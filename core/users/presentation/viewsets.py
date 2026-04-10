@@ -69,6 +69,7 @@ class UsersViewSet(viewsets.ViewSet):
         data = {
             "id": str(u.id),
             "name": u.name,
+            "type": u.type,
             "email": u.email,
             "profile_picture": u.profile_picture,
         }

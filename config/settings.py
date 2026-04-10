@@ -15,7 +15,6 @@ import os
 import dj_database_url
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
-from celery.schedules import crontab
 
 load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -73,7 +72,7 @@ INSTALLED_APPS = [
     "core.weather",
     "core.occurrences",
     "core.forecast",
-    "core.flood_camera_monitoring",
+    # "core.flood_camera_monitoring",  # Disabled in this branch
     "core.uploader",
     "core.addressing",
     "core.flood_point_registering",
@@ -188,14 +187,8 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/1")
 
-# Optional: simple beat schedule to validate the worker periodically
-from celery.schedules import crontab  # type: ignore
-
 CELERY_BEAT_SCHEDULE = {
-    "flood-analyze-all-cameras": {
-        "task": "core.flood_camera_monitoring.infra.tasks.analyze_all_cameras_task",
-        "schedule": 300.00,
-    },
+    # Flood camera monitoring task disabled in this branch.
 }
 
 # Logging: ensure our modules and Celery log to console at INFO level
@@ -216,12 +209,6 @@ LOGGING = {
     "loggers": {
         "django": {"handlers": ["console"], "level": "INFO"},
         "celery": {"handlers": ["console"], "level": "INFO"},
-        # Parent logger for all flood monitoring modules
-        "core.flood_camera_monitoring": {
-            "handlers": ["console"],
-            "level": "INFO",
-            "propagate": False,
-        },
     },
 }
 

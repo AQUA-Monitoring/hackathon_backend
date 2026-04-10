@@ -2,7 +2,7 @@
 
 # hackathon_backend
 
-Backend Django/DRF com monitoração de enchentes via câmeras, previsão do tempo, ocorrências, cadastro de pontos de alagamento, upload e gerenciamento de usuários. Orquestrado com Celery + Redis e Postgres. Pronto para rodar com Docker Compose.
+Backend Django/DRF com previsão do tempo, ocorrências, cadastro de pontos de alagamento, upload e gerenciamento de usuários. Orquestrado com Celery + Redis e Postgres. Pronto para rodar com Docker Compose.
 
 </div>
 
@@ -28,7 +28,7 @@ Sumário
 
 Este projeto fornece uma API para:
 
-- Monitoração de enchentes por câmeras, com processamento de imagens e agendamento de análises.
+- Monitoração de enchentes por pontos cadastrados e dados meteorológicos.
 - Consulta de clima e previsão do tempo.
 - Registro e consulta de ocorrências.
 - Cadastro de pontos de alagamento.
@@ -37,7 +37,7 @@ Este projeto fornece uma API para:
 
 Principais apps em `core/`:
 
-- `users`, `weather`, `forecast`, `occurrences`, `flood_camera_monitoring`, `flood_point_registering`, `uploader`, `addressing`, `donation`.
+- `users`, `weather`, `forecast`, `occurrences`, `flood_point_registering`, `uploader`, `addressing`, `donation`.
 
 ## Arquitetura e stack
 
@@ -46,7 +46,7 @@ Principais apps em `core/`:
 - Tarefas: Celery 5 + Redis (broker e result backend) + django-celery-beat (agendador)
 - Banco: PostgreSQL
 - Mídia/estáticos: `MEDIA_ROOT` em volume Docker; `STATIC_ROOT` = `staticfiles`
-- Processamento: OpenCV, Torch (CPU), scikit-learn
+- Processamento: scikit-learn
 - Geoespacial: GeoPandas, Shapely, PROJ, GDAL (dependências via imagem Docker)
 - Conteinerização: Docker/Docker Compose
 
@@ -71,7 +71,7 @@ Opcional (para rodar localmente sem Docker):
 - Python 3.13
 - Postgres 16+
 - Redis 7+
-- Bibliotecas do sistema para GDAL/GEOS/PROJ, OpenCV e ffmpeg (o Docker já provê isso)
+- Bibliotecas do sistema para GDAL/GEOS/PROJ (o Docker já provê isso)
 
 ## Início rápido (Docker) — recomendado
 
@@ -228,13 +228,9 @@ Portas e acesso (Docker):
 ## Tarefas assíncronas (Celery/Beat)
 
 - Worker: processa tarefas; Beat: agenda tarefas periódicas.
-- Agendamento padrão no settings inclui (a cada 300s):
-
-  task: core.flood_camera_monitoring.infra.tasks.analyze_all_cameras_task
-  schedule: 300 segundos
+- Nesta branch, não há tarefa periódica padrão relacionada ao módulo de câmeras.
 
 - O projeto usa `django-celery-beat` como scheduler (tabelas precisam existir). O código faz fallback para um scheduler persistente se as tabelas ainda não existirem, evitando crash no primeiro start. Ainda assim, aplique migrações.
-- Exemplo de tarefa utilitária: `core/flood_camera_monitoring/tasks.py::refresh_all_and_cache_task`, que executa análise unificada e popula cache Redis.
 
 ## Endpoints e autenticação
 
@@ -249,7 +245,6 @@ Base de rotas (veja `config/urls.py`):
   - `GET/POST /api/weather/...`
   - `GET/POST /api/forecast/...`
   - `GET/POST /api/occurrences/...`
-  - `GET/POST /api/flood_monitoring/...`
   - `GET/POST /api/upload/...`
   - `GET/POST /api/addressing/...`
   - `GET/POST /api/donate/...`
@@ -265,7 +260,7 @@ Autenticação:
 Raiz (principais itens):
 
 - `config/` — settings, urls, wsgi/asgi, celery, paginação
-- `core/` — apps de domínio (users, weather, forecast, occurrences, flood_camera_monitoring, etc.)
+- `core/` — apps de domínio (users, weather, forecast, occurrences, etc.)
 - `docker/` — Dockerfiles alternativos e `docker-compose.yml`
 - `manage.py` — utilitário Django
 - `requirements.txt` — dependências pinadas para build
@@ -309,5 +304,4 @@ Alternativamente, o compose de dev usa `docker/Dockerfile.slim` com `runserver`.
 ## Licença
 
 MIT (veja `pyproject.toml`).
-
 

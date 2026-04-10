@@ -9,6 +9,6 @@ RUN pip install pdm && pdm install
 
 COPY . .
 
-EXPOSE 8000
+EXPOSE 8090
 
-CMD ["pdm", "run", "dev", "0.0.0.0:8000"]
+CMD ["pdm", "run", "dev", "0.0.0.0:8090"]
