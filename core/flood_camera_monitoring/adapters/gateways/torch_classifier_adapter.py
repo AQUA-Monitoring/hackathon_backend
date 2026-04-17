@@ -14,8 +14,10 @@ import logging
 
 import io
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as T
+import torchvision.models as tv_models
 from PIL import Image
 
 from core.flood_camera_monitoring.domain.entities import (
@@ -39,6 +41,36 @@ def _to_pil(image: ImageInput) -> Image.Image:
 class TorchFloodClassifier(FloodClassifierPort):
     checkpoint_path: Union[str, Path]
     device: Union[str, torch.device] = "cpu"
+
+    @staticmethod
+    def _build_builtin_model(model_name: str, num_classes: int) -> torch.nn.Module:
+        ctor = getattr(tv_models, model_name, None)
+        if ctor is None:
+            raise ValueError(f"Unsupported backbone '{model_name}'")
+
+        try:
+            backbone = ctor(weights=None)
+        except TypeError:
+            backbone = ctor(pretrained=False)
+
+        in_features = int(backbone.fc.in_features)
+        backbone.fc = nn.Sequential(
+            nn.Dropout(p=0.3),
+            nn.Linear(in_features, 512),
+            nn.ReLU(inplace=True),
+            nn.Dropout(p=0.2),
+            nn.Linear(512, int(num_classes)),
+        )
+
+        class _Wrapper(nn.Module):
+            def __init__(self, wrapped):
+                super().__init__()
+                self.backbone = wrapped
+
+            def forward(self, x):
+                return self.backbone(x)
+
+        return _Wrapper(backbone)
 
     def __post_init__(self) -> None:
         logger = logging.getLogger(__name__)
@@ -131,28 +163,37 @@ class TorchFloodClassifier(FloodClassifierPort):
         elif ckpt is not None:
             config = ckpt.get("config", {"model_name": "resnet50", "num_classes": 2})
             self.class_names = ckpt.get("class_names", ["normal", "flooded"])
+            model_name = str(config.get("model_name", "resnet50"))
+            num_classes = len(self.class_names)
             try:
                 from core.flood_camera_monitoring.infra.machine_model.model import get_model  # type: ignore
 
                 self.model = get_model(
-                    config.get("model_name", "resnet50"),
-                    num_classes=len(self.class_names),
+                    model_name,
+                    num_classes=num_classes,
                     pretrained=False,
                 )
+            except Exception as e:
+                logger.warning(
+                    "Falha ao importar get_model (%s). Usando construtor embutido.", e
+                )
+                self.model = self._build_builtin_model(model_name, num_classes)
+
+            try:
                 self.model.load_state_dict(ckpt["model_state_dict"])  # type: ignore[index]
-                self.model.to(self.device)
-                self.model.eval()
-                logger.info(
-                    "Checkpoint carregado (%s) com classes %s",
-                    path.name,
-                    self.class_names,
+            except RuntimeError as e:
+                logger.warning(
+                    "load_state_dict estrito falhou (%s). Tentando strict=False.", e
                 )
-            except Exception as e:  # pragma: no cover
-                logger.error(
-                    "Falha ao reconstruir modelo a partir do checkpoint: %s", e
-                )
-                self._init_fallback_model()
-                return
+                self.model.load_state_dict(ckpt["model_state_dict"], strict=False)  # type: ignore[index]
+
+            self.model.to(self.device)
+            self.model.eval()
+            logger.info(
+                "Checkpoint carregado (%s) com classes %s",
+                path.name,
+                self.class_names,
+            )
         else:
             logger.error(
                 "Falha ao carregar '%s'. Erros: %s. Ativando fallback.",
@@ -176,8 +217,6 @@ class TorchFloodClassifier(FloodClassifierPort):
         Produz probabilidades estáticas (normal=90%, flooded=10%) para evidenciar
         que é um modo de contingência.
         """
-        import torch.nn as nn
-
         logger = logging.getLogger(__name__)
         self._fallback = True
         self.class_names = ["normal", "flooded"]

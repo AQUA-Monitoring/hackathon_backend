@@ -2,14 +2,11 @@ from rest_framework import status, permissions, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from core.users.presentation.serializers import (
+from core.users.serializers.user import (
     UserSerializer,
     SignupSerializer,
 )
-from core.users.infra.models import User as DjangoUser
-from core.users.presentation.auth_views import generate_tokens_for_user
-from core.uploader.infra.django_storage_uploader import DjangoStorageUploader
-from core.uploader.application.services import UploadBinaryService
+from core.users.service import UsersService
 
 
 class UsersViewSet(viewsets.ViewSet):
@@ -22,6 +19,10 @@ class UsersViewSet(viewsets.ViewSet):
 
     permission_classes = [permissions.AllowAny]
 
+    @staticmethod
+    def _users_service() -> UsersService:
+        return UsersService()
+
     @action(
         detail=False,
         methods=["post"],
@@ -31,28 +32,24 @@ class UsersViewSet(viewsets.ViewSet):
     def signup(self, request):
         serializer = SignupSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        email = serializer.validated_data["email"].lower().strip()
-        if DjangoUser.objects.filter(email=email).exists():
-            return Response(
-                {"detail": "E-mail já cadastrado."}, status=status.HTTP_400_BAD_REQUEST
+        service = self._users_service()
+
+        try:
+            user = service.create_user(
+                name=serializer.validated_data["name"],
+                email=serializer.validated_data["email"],
+                password=serializer.validated_data["password"],
+                profile_picture=serializer.validated_data.get("profile_picture"),
             )
+        except ValueError as exc:
+            if str(exc) == "duplicate_email":
+                return Response(
+                    {"detail": "E-mail já cadastrado."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            raise
 
-        user = DjangoUser(name=serializer.validated_data["name"], email=email)
-        user.set_password(serializer.validated_data["password"])
-
-        # Optional profile picture file -> upload and set URL
-        pic = serializer.validated_data.get("profile_picture")
-        if pic:
-            data = pic.read()
-            path = f"users/{email}/profile/{pic.name}"
-            svc = UploadBinaryService(DjangoStorageUploader(base_dir="uploads"))
-            result = svc.execute(
-                data=data, path=path, content_type=getattr(pic, "content_type", None)
-            )
-            user.profile_picture = result.url
-
-        user.save()
-        tokens = generate_tokens_for_user(user)
+        tokens = service.generate_tokens_for_user(user)
         return Response(
             {"user": UserSerializer(user).data, "tokens": tokens},
             status=status.HTTP_201_CREATED,
@@ -65,12 +62,5 @@ class UsersViewSet(viewsets.ViewSet):
         permission_classes=[permissions.IsAuthenticated],
     )
     def me(self, request):
-        u: DjangoUser = request.user
-        data = {
-            "id": str(u.id),
-            "name": u.name,
-            "type": u.type,
-            "email": u.email,
-            "profile_picture": u.profile_picture,
-        }
-        return Response(data, status=status.HTTP_200_OK)
+        service = self._users_service()
+        return Response(service.me_payload(request.user), status=status.HTTP_200_OK)
