@@ -41,10 +41,176 @@ git clone <repo-url> ~/apps/aqua-prod
 cd ~/apps/aqua-prod
 git checkout main
 
-# Desenvolvimento
-git clone <repo-url> ~/apps/aqua-dev
-cd ~/apps/aqua-dev
-git checkout develop
+Serviços no compose hospedado (`docker/docker-compose.yml`):
+
+- `web`: Django em modo dev (runserver) ouvindo 0.0.0.0:8090
+- `worker`: Celery worker
+- `beat`: Celery beat (agendador)
+- `redis`: Redis
+- `db`: Postgres (exposto na máquina host em 5433)
+
+Volumes nomeados externos (dev): `docker_pgdata` (Postgres) e `docker_media` (arquivos de mídia).
+Rede compartilhada entre composes: `docker_shared_backend`.
+No `web` hospedado, o código roda imutável (sem bind mount) e com filesystem em modo somente leitura.
+
+## Requisitos
+
+Recomendado:
+
+- Docker e Docker Compose
+
+Opcional (para rodar localmente sem Docker):
+
+- Python 3.13
+- Postgres 16+
+- Redis 7+
+- Bibliotecas do sistema para GDAL/GEOS/PROJ, OpenCV e ffmpeg (o Docker já provê isso)
+
+## Início rápido (Docker) — recomendado
+
+1) Crie os volumes externos uma única vez:
+
+   docker volume create docker_pgdata
+   docker volume create docker_media
+
+2) Copie o arquivo de exemplo e ajuste as variáveis:
+
+  ```bash
+  cp .env.sample .env
+  ```
+
+3) Suba os serviços hospedados (imutáveis, sem bind mount de código):
+
+  # opção A: executar de dentro da pasta docker/
+  ```bash
+  cd docker
+  docker compose up -d --build
+  ```
+
+  # opção B: de qualquer lugar, informando o compose
+  ```bash
+  docker compose -f docker/docker-compose.yml up -d --build
+  ```
+
+4) Aplique migrações e crie um superusuário:
+
+  ```bash
+  docker compose -f docker/docker-compose.yml exec web python manage.py migrate
+  docker compose -f docker/docker-compose.yml exec web python manage.py createsuperuser
+  ```
+
+5) Acesse:
+
+- API: http://localhost:8090/
+- Admin: http://localhost:8090/admin/
+
+6) Opcional: suba um segundo container `web` local (editável), consumindo o mesmo banco e a mesma mídia:
+
+  ```bash
+  docker compose -f docker/docker-compose.local.yml up -d --build
+  ```
+
+- API local paralela: http://localhost:8091/
+- Esse `web` local usa bind mount do código (`..:/app`) para desenvolvimento e usa a rede `docker_shared_backend` para acessar `db:5432` e `redis:6379` do compose hospedado.
+- No compose local, `docker_media` está montado como somente leitura (`:ro`) para evitar escrita acidental de uploads.
+- Se precisar testar upload via local, altere `docker/docker-compose.local.yml` para `media:/app/media` (sem `:ro`).
+
+Logs úteis:
+
+- Web:
+  ```bash
+  docker compose -f docker/docker-compose.yml logs -f web
+  ```
+- Worker:
+  ```bash
+  docker compose -f docker/docker-compose.yml logs -f worker
+  ```
+- Beat:
+  ```bash
+  docker compose -f docker/docker-compose.yml logs -f beat
+  ```
+- Web local (compose local):
+  ```bash
+  docker compose -f docker/docker-compose.local.yml logs -f web
+  ```
+
+Parar tudo:
+
+  ```bash
+  docker compose -f docker/docker-compose.yml down
+  docker compose -f docker/docker-compose.local.yml down
+  ```
+
+## Desenvolvimento local 
+
+1) Crie e ative um ambiente virtual Python 3.13:
+
+  ```bash
+  python3.13 -m venv .venv
+  source .venv/bin/activate
+  ```
+
+2) Instale dependências Python (pode exigir libs de sistema avançadas; prefira Docker se encontrar erros):
+
+  ```bash
+  pip install --upgrade pip
+  pip install -r requirements.txt
+  ```
+
+3) Configure e suba Postgres e Redis locais, ou use `DATABASE_URL`, `CELERY_BROKER_URL` e `CELERY_RESULT_BACKEND` apontando para serviços disponíveis.
+
+4) Crie o arquivo `.env` (veja abaixo), execute migrações e rode o servidor:
+
+  ```bash
+  python manage.py migrate
+  python manage.py runserver 0.0.0.0:8000
+  ```
+
+Worker/Beat localmente (outros terminais):
+
+  ```bash
+  celery -A config worker -l info
+  celery -A config beat -l info
+  ```
+
+## Variáveis de ambiente (.env)
+
+Exemplo seguro de `.env` (use `cp .env.sample .env` e ajuste os valores):
+
+```dotenv
+# Django
+DJANGO_SETTINGS_MODULE=config.settings
+DEBUG=1
+DJANGO_SECRET_KEY=<defina-uma-chave-forte>
+
+# Banco de Dados (use APENAS UMA das opções)
+# Opção A: DATABASE_URL tem precedência quando definido
+# Formato: postgresql://<usuario>:<senha>@<host>:<porta>/<nome_db>
+DATABASE_URL=postgresql://<db_user>:<db_password>@db:5432/<db_name>
+
+# Opção B: Variáveis individuais do Postgres (se DATABASE_URL estiver vazio)
+POSTGRES_USER=<db_user>
+POSTGRES_PASSWORD=<db_password>
+POSTGRES_DB=<db_name>
+POSTGRES_HOST=db
+POSTGRES_PORT=5432
+
+# Celery / Redis
+CELERY_BROKER_URL=redis://redis:6379/0
+CELERY_RESULT_BACKEND=redis://redis:6379/1
+REDIS_CACHE_URL=redis://redis:6379/2
+
+# JWT (opcional)
+JWT_ACCESS_MINUTES=60
+JWT_REFRESH_DAYS=7
+JWT_ALGORITHM=HS256
+
+# API
+API_PAGE_SIZE=20
+
+# Outros
+CAMERA_INSTALL_URL=
+TZ=America/Sao_Paulo
 ```
 
 ### 2. Configurar ambiente
@@ -71,8 +237,13 @@ docker compose -p aqua-dev up --build
 # Apenas câmeras
 docker compose -p aqua-dev --profile flood up --build
 
+<<<<<<< HEAD
 # Apenas demo
 docker compose -p aqua-dev --profile demo up --build
+=======
+- No Docker, prefixe os comandos com `docker compose -f docker/docker-compose.yml exec web ...` para o compose hospedado.
+- Para executar algo no `web` local paralelo, use `docker compose -f docker/docker-compose.local.yml exec web ...`.
+>>>>>>> 14877fa (feat: add local Docker Compose configuration for development with bind mount and shared network)
 
 # Câmeras e demo
 docker compose -p aqua-dev --profile flood --profile demo up --build
@@ -171,6 +342,7 @@ Principais variáveis:
 | `FLOOD_MODEL_DRIVE_ID` | ID do modelo ML no Google Drive |
 | `API_URL` | URL da API para sync remoto |
 
+<<<<<<< HEAD
 ---
 
 ## Estrutura do Projeto
@@ -213,3 +385,6 @@ O `Dockerfile` da raiz (multi-stage com Gunicorn) é usado pelo Dokku, não pelo
 - **Conflito de volumes**: Use `-p aqua-prod` / `-p aqua-dev` para isolar nomes
 - **Healthcheck DB falhando**: Verifique se `POSTGRES_USER` no `.env` corresponde ao usuário do healthcheck
 - **Migrações pendentes**: `docker compose exec web python manage.py migrate`
+=======
+MIT (veja `pyproject.toml`).
+>>>>>>> 14877fa (feat: add local Docker Compose configuration for development with bind mount and shared network)
