@@ -13,8 +13,10 @@ services:
         condition: service_healthy
     ports:
       - "8090:8090"
+    read_only: true
+    tmpfs:
+      - /tmp
     volumes:
-      - ..:/app
       - media:/app/media
 
   worker:
@@ -80,3 +82,7 @@ volumes:
   media:
     external: true
     name: docker_media
+
+networks:
+  default:
+    name: docker_shared_backend

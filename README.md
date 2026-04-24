@@ -50,15 +50,17 @@ Principais apps em `core/`:
 - Geoespacial: GeoPandas, Shapely, PROJ, GDAL (dependências via imagem Docker)
 - Conteinerização: Docker/Docker Compose
 
-Serviços no Docker Compose (`docker/docker-compose.yml`):
+Serviços no compose hospedado (`docker/docker-compose.yml`):
 
-- `web`: Django em modo dev (runserver) ouvindo 0.0.0.0:8000
+- `web`: Django em modo dev (runserver) ouvindo 0.0.0.0:8090
 - `worker`: Celery worker
 - `beat`: Celery beat (agendador)
 - `redis`: Redis
 - `db`: Postgres (exposto na máquina host em 5433)
 
 Volumes nomeados externos (dev): `docker_pgdata` (Postgres) e `docker_media` (arquivos de mídia).
+Rede compartilhada entre composes: `docker_shared_backend`.
+No `web` hospedado, o código roda imutável (sem bind mount) e com filesystem em modo somente leitura.
 
 ## Requisitos
 
@@ -86,7 +88,7 @@ Opcional (para rodar localmente sem Docker):
   cp .env.sample .env
   ```
 
-3) Suba os serviços (a partir da pasta `docker/` ou informando o arquivo compose explicitamente):
+3) Suba os serviços hospedados (imutáveis, sem bind mount de código):
 
   # opção A: executar de dentro da pasta docker/
   ```bash
@@ -108,8 +110,19 @@ Opcional (para rodar localmente sem Docker):
 
 5) Acesse:
 
-- API: http://localhost:8000/
-- Admin: http://localhost:8000/admin/
+- API: http://localhost:8090/
+- Admin: http://localhost:8090/admin/
+
+6) Opcional: suba um segundo container `web` local (editável), consumindo o mesmo banco e a mesma mídia:
+
+  ```bash
+  docker compose -f docker/docker-compose.local.yml up -d --build
+  ```
+
+- API local paralela: http://localhost:8091/
+- Esse `web` local usa bind mount do código (`..:/app`) para desenvolvimento e usa a rede `docker_shared_backend` para acessar `db:5432` e `redis:6379` do compose hospedado.
+- No compose local, `docker_media` está montado como somente leitura (`:ro`) para evitar escrita acidental de uploads.
+- Se precisar testar upload via local, altere `docker/docker-compose.local.yml` para `media:/app/media` (sem `:ro`).
 
 Logs úteis:
 
@@ -125,11 +138,16 @@ Logs úteis:
   ```bash
   docker compose -f docker/docker-compose.yml logs -f beat
   ```
+- Web local (compose local):
+  ```bash
+  docker compose -f docker/docker-compose.local.yml logs -f web
+  ```
 
 Parar tudo:
 
   ```bash
   docker compose -f docker/docker-compose.yml down
+  docker compose -f docker/docker-compose.local.yml down
   ```
 
 ## Desenvolvimento local 
@@ -219,7 +237,8 @@ Observações:
 
   python manage.py makemigrations
 
-- No Docker, prefixe os comandos com `docker compose exec web ...` conforme mostrado no Início rápido.
+- No Docker, prefixe os comandos com `docker compose -f docker/docker-compose.yml exec web ...` para o compose hospedado.
+- Para executar algo no `web` local paralelo, use `docker compose -f docker/docker-compose.local.yml exec web ...`.
 
 Portas e acesso (Docker):
 
@@ -309,5 +328,3 @@ Alternativamente, o compose de dev usa `docker/Dockerfile.slim` com `runserver`.
 ## Licença
 
 MIT (veja `pyproject.toml`).
-
-
