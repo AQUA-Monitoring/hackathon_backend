@@ -2,14 +2,14 @@ from django.views.decorators.csrf import csrf_exempt
 import mercadopago, os, json, uuid
 
 class PaymentService:
-    def payment_card(serializer):
+    def payment_card(request):
         sdk = mercadopago.SDK(os.getenv('ACCESS_TOKEN'))
         request_options = mercadopago.config.RequestOptions()
         request_options.custom_headers = {
             'x-idempotency-key': str(uuid.uuid4())
         }
 
-        data = serializer
+        data = json.loads(request.body)
         payer = data.get('payer')
         identification = payer.get('identification')
         payment_data = {
@@ -31,14 +31,14 @@ class PaymentService:
         payment = response['response']
         return payment
     
-    def payment_pix(serializer):
+    def payment_pix(request):
         sdk = mercadopago.SDK(os.getenv('ACCESS_TOKEN'))
         request_options = mercadopago.config.RequestOptions()
         request_options.custom_headers = {
             'x-idempotency-key': str(uuid.uuid4())
         }
     
-        data = serializer
+        data = json.loads(request.body)
         payment_data = {
             'transaction_amount': data.get('transaction_amount'),
             'description': data.get('description'),
@@ -55,7 +55,7 @@ class PaymentService:
         }
 
         response = sdk.payment().create(payment_data, request_options)
-        payment = response
+        payment = response['response']
         return payment
     
     def saved_card(request):
