@@ -81,6 +81,7 @@ INSTALLED_APPS = [
     "core.uploader",
     "core.addressing",
     "core.flood_point_registering",
+    "core.donate",
 ]
 
 
