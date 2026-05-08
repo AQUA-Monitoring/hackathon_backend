@@ -1,6 +1,6 @@
 from django.urls import path
 
-from core.donate.presentation.payment import CardAPIView, PixAPIView, SavedCardAPIView, PaymentWebhookAPIView
+from core.donate.presentation.views import CardAPIView, PixAPIView, SavedCardAPIView, PaymentWebhookAPIView
 
 urlpatterns = [
     path('card/', CardAPIView.as_view(), name='card_api_view'),
