@@ -10,9 +10,9 @@ pytz==2025.2
 tzdata==2025.2
 dj-database-url==3.0.1
 psycopg[binary]>=3.2.1
-
-# 🚀 WSGI Server
 gunicorn==23.0.0
+python-magic==0.4.27
+Pillow==10.4.0
 
 # 🎨 Static Files
 whitenoise==6.10.0
