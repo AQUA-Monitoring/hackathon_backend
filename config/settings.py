@@ -82,6 +82,7 @@ INSTALLED_APPS = [
     "core.addressing",
     "core.flood_point_registering",
     "core.donate",
+    "core.blog",
 ]
 
 

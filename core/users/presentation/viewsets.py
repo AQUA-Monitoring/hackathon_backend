@@ -2,8 +2,19 @@ from rest_framework import status, permissions, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+<<<<<<< HEAD
 from core.users.serializers.user import UserSerializer, SignupSerializer
 from core.users.service import UsersService
+=======
+from core.users.presentation.serializers import (
+    UserSerializer,
+    SignupSerializer,
+)
+from core.users.infra.models import User as DjangoUser
+from core.users.presentation.auth_views import generate_tokens_for_user
+# from core.uploader.infra.django_storage_uploader import DjangoStorageUploader
+# from core.uploader.application.services import UploadBinaryService
+>>>>>>> 8c62268 (feat: Add blog module with templates, serializers, and views.)
 
 
 class UsersViewSet(viewsets.ViewSet):
