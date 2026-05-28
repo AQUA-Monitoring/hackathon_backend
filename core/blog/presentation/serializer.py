@@ -1,6 +1,6 @@
 from rest_framework import serializers
-from uploader.serializers import ImageSerializer
-from infra.models import Post  
+from core.uploader.serializers import ImageSerializer
+from core.blog.infra.models import Post  
 
 class PostSerializer(serializers.ModelSerializer):
     banner_image = ImageSerializer(required=True)
