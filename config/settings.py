@@ -46,6 +46,8 @@ CSRF_TRUSTED_ORIGINS = [
     "http://localhost:8000",
     "http://localhost:5173",
     "http://localhost:3000",
+    "https://*.michalski.app",
+
 ]
 
 CORS_ALLOWED_ORIGINS = [
@@ -53,6 +55,8 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "https://aqua.fabricadesoftware.ifc.edu.br",
     "https://*.fabricadesoftware.ifc.edu.br",
+    "https://*.michalski.app",
+
 ]
 
 
@@ -164,7 +168,7 @@ USE_I18N = True
 
 USE_TZ = True
 
-APPEND_SPLASH = True
+APPEND_SLASH = True
 
 
 # Static files (CSS, JavaScript, Images)
