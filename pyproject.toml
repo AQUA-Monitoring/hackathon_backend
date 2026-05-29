@@ -55,9 +55,5 @@ makemigrations = "python manage.py makemigrations"
 createsuperuser = "python manage.py createsuperuser"
 celery = "celery -A config worker --loglevel=INFO --concurrency=10 -n worker1.%h --pool=solo"
 beat = "celery -A config beat --loglevel=INFO"
-<<<<<<< HEAD
-shell = "python manage.py shell"
-=======
 shell = "python manage.py shell"
 startapp = "python manage.py startapp"
->>>>>>> a625db5 (chore: update dependencies in pyproject.toml and requirements.txt)

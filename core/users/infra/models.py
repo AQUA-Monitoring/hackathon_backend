@@ -19,7 +19,14 @@ class User(models.Model):
     google_sub = models.CharField(
         max_length=255, unique=True, null=True, blank=True, db_index=True
     )
-    profile_picture = models.ForeignKey(Image, on_delete=models.SET_NULL, related_name="profile_pictures", null=True, blank=True)
+    profile_picture_url = models.URLField(blank=True, max_length=512)
+    profile_picture = models.ForeignKey(
+        Image,
+        on_delete=models.SET_NULL,
+        related_name="profile_pictures",
+        null=True,
+        blank=True,
+    )
     type = models.CharField(
         max_length=20, choices=UserType.choices, default=UserType.STANDARD
     )

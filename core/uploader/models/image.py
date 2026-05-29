@@ -1,11 +1,15 @@
 import mimetypes
 import uuid
+from pathlib import Path
 
 from django.db import models
 
 
 def image_file_path(image, _) -> str:
-    extension: str = mimetypes.guess_extension(image.file.file.content_type)
+    content_type = getattr(image.file, "content_type", None)
+    extension: str | None = mimetypes.guess_extension(content_type or "")
+    if not extension and getattr(image.file, "name", None):
+        extension = Path(image.file.name).suffix
     if extension == ".jpe":
         extension = ".jpg"
     return f"images/{image.public_id}{extension or ''}"

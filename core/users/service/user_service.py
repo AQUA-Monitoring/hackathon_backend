@@ -7,15 +7,12 @@ from rest_framework import exceptions
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from core.users.infra.models import User
-from core.uploader.application.services import UploadBinaryService
-from core.uploader.infra.django_storage_uploader import DjangoStorageUploader
+from core.uploader.models import Image
 
 
 @dataclass
 class UsersService:
     """Application service for user auth/account flows."""
-
-    upload_base_dir: str = "uploads"
 
     @staticmethod
     def normalize_email(email: str) -> str:
@@ -35,6 +32,7 @@ class UsersService:
         email: str,
         password: str,
         profile_picture: Any | None = None,
+        profile_picture_id: str | None = None,
     ) -> User:
         normalized_email = self.normalize_email(email)
         if User.objects.filter(email=normalized_email).exists():
@@ -43,16 +41,52 @@ class UsersService:
         user = User(name=name, email=normalized_email)
         user.set_password(password)
 
-        if profile_picture:
-            data = profile_picture.read()
-            path = f"users/{normalized_email}/profile/{profile_picture.name}"
-            uploader = DjangoStorageUploader(base_dir=self.upload_base_dir)
-            result = UploadBinaryService(uploader).execute(
-                data=data,
-                path=path,
-                content_type=getattr(profile_picture, "content_type", None),
+        if profile_picture_id:
+            image = Image.objects.filter(attachment_key=profile_picture_id).first()
+            if not image:
+                raise ValueError("invalid_profile_picture")
+            user.profile_picture = image
+        elif profile_picture:
+            image = Image.objects.create(
+                file=profile_picture,
+                description=f"Profile picture for {normalized_email}",
             )
-            user.profile_picture = result.url
+            user.profile_picture = image
+
+        user.save()
+        return user
+
+    def update_user(
+        self,
+        *,
+        user: User,
+        name: str | None = None,
+        email: str | None = None,
+        profile_picture: Any | None = None,
+        profile_picture_id: str | None = None,
+    ) -> User:
+        if name is not None:
+            user.name = name
+
+        if email is not None:
+            normalized_email = self.normalize_email(email)
+            if normalized_email != user.email and User.objects.filter(
+                email=normalized_email
+            ).exists():
+                raise ValueError("duplicate_email")
+            user.email = normalized_email
+
+        if profile_picture_id:
+            image = Image.objects.filter(attachment_key=profile_picture_id).first()
+            if not image:
+                raise ValueError("invalid_profile_picture")
+            user.profile_picture = image
+        elif profile_picture:
+            image = Image.objects.create(
+                file=profile_picture,
+                description=f"Profile picture for {user.email}",
+            )
+            user.profile_picture = image
 
         user.save()
         return user
@@ -76,5 +110,9 @@ class UsersService:
             "name": user.name,
             "type": user.type,
             "email": user.email,
-            "profile_picture": user.profile_picture,
+            "profile_picture": (
+                user.profile_picture.url
+                if user.profile_picture
+                else user.profile_picture_url or None
+            ),
         }
