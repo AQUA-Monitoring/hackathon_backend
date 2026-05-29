@@ -41,10 +41,10 @@ urlpatterns = [
     path("api/weather/", include("core.weather.presentation.urls")),
     path("api/forecast/", include("core.forecast.presentation.urls")),
     path("api/occurrences/", include("core.occurrences.presentation.urls")),
-    # path(
-    #     "api/flood_monitoring/",
-    #     include("core.flood_camera_monitoring.presentation.urls"),
-    # ),
+    path(
+        "api/flood_monitoring/",
+        include("core.flood_camera_monitoring.presentation.urls"),
+    ),
     path("api/upload/", include(uploader_router.urls)),
     path("api/addressing/", include("core.addressing.presentation.urls")),
     path("api/donate/", include("core.donate.presentation.urls")),

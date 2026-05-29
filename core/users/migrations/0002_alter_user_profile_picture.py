@@ -12,9 +12,20 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.AlterField(
-            model_name='user',
-            name='profile_picture',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='profile_pictures', to='uploader.image'),
+        migrations.RenameField(
+            model_name="user",
+            old_name="profile_picture",
+            new_name="profile_picture_url",
+        ),
+        migrations.AddField(
+            model_name="user",
+            name="profile_picture",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.SET_NULL,
+                related_name="profile_pictures",
+                to="uploader.image",
+            ),
         ),
     ]
