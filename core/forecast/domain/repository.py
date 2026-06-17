@@ -10,5 +10,5 @@ class MachineLearningRepository(ABC):
         pass
 
     @abstractmethod
-    def forecast(self, lat: float, lon: float, flood: int, date: str, probability: float):
+    def forecast(self, lat: float, lon: float, date: str, flood: float, probability: float):
         pass

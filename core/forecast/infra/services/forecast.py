@@ -65,33 +65,34 @@ def runForecast(repo: MachineLearningRepository): # Aqui é onde realmente acont
     X_train, X_test, Y_train, Y_test = train_test_split(X_scaled, Y, test_size=0.25) # Devolve variáveis de teste e de treinamento da IA com base no X padrão
 
     rf = RandomForestClassifier(
-        n_estimators=1000,
-        max_depth=None,
+        n_estimators=200,
+        max_depth=10,
+        min_samples_leaf=5,
         random_state=None,
         max_features="sqrt",
         class_weight="balanced"
     )
-    clf = CalibratedClassifierCV(rf, cv=3, method="isotonic")
+    clf = CalibratedClassifierCV(rf, cv=3, method="sigmoid")
     smote = SMOTE()
     X_res, Y_res = smote.fit_resample(X_train, Y_train)
     clf.fit(X_res, Y_res)
 
     # Previsão
     df["date"] = pd.to_datetime(df["date"])
-    today = pd.Timestamp.today().normalize()
-    df_future = df[df["date"] >= today - pd.Timedelta(days=7)]
+    start_date = pd.Timestamp("2026-06-10").normalize()
+    end_date = pd.Timestamp("2026-06-24").normalize()
+    df_future = df[(df["date"] >= start_date) & (df["date"] <= end_date)]
 
     X_future = df_future[features].values
     X_future_scaled = scaler.transform(X_future)
 
-    Y_predict = clf.predict(X_future_scaled)
     Y_proba = clf.predict_proba(X_future_scaled)[:, 1]
 
     for i, row in enumerate(df_future.itertuples(index=False)):
-        Forecast.objects.update_or_create(
-            date = row.date,
-            latitude = row.latitude,
-            longitude = row.longitude,
-            flood = int(Y_predict[i]),
-            probability = float(Y_proba[i])
+        repo.forecast(
+            lat=row.latitude,
+            lon=row.longitude,
+            date=row.date,
+            flood=float(Y_proba[i]),
+            probability=float(Y_proba[i])
         )

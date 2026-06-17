@@ -33,7 +33,7 @@ class WeatherViewSet(ModelViewSet):
     @action(detail=False, methods=["post"], url_path="search")
     def search(self, request):
         try:
-            start = "2025-08-25"
+            start = f"{datetime.now().year - 1}-01-01"
             end = datetime.now().strftime("%Y-%m-%d")
             from core.weather.infra.services.queue import enqueueFillClimates
 

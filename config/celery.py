@@ -1,11 +1,17 @@
 import os
 import logging
 from celery import Celery
+import traceback
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 
 app = Celery("config")
 app.config_from_object("django.conf:settings", namespace="CELERY")
+
+import django
+
+django.setup()
+
 app.autodiscover_tasks()
 
 # Explicitly wire broker and backend (env overrides settings if provided)
@@ -33,12 +39,6 @@ try:
 except Exception:  # pragma: no cover - proteção defensiva
     pass
 
-
-# Ensure modules are imported in case autodiscover misses nested packages
-try:
-    __import__("core.users.app.tasks")
-except Exception:  # pragma: no cover - best effort
-    pass
 
 # Ensure flood monitoring tasks are registered
 # try:

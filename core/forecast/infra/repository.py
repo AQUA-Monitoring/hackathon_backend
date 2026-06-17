@@ -9,11 +9,10 @@ class ForecastRepoImpl(MachineLearningRepository):
     def getWeatherByCoord(self, lat, lon):
         return Weather.objects.filter(latitude=lat, longitude=lon)
     
-    def forecast(self, lat, lon, flood, date, probability):
+    def forecast(self, lat, lon, date, flood, probability):
         Forecast.objects.update_or_create(
-            latitude = lat,
-            longitude = lon,
-            flood = flood,
-            date = date,
-            probability = probability
+            latitude=lat,
+            longitude=lon,
+            date=date,
+            defaults={"flood": flood, "probability": probability}
         )
