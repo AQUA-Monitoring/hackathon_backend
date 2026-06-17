@@ -1,5 +1,5 @@
 from django.contrib import admin
-from core.forecast.infra.models import Forecast
+from core.forecast.models import Forecast
 
 @admin.register(Forecast)
 class ForecastAdmin(admin.ModelAdmin):
