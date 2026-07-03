@@ -1,5 +1,5 @@
 from django.db import models
-from core.occurrences.infra.models import Occurrence
+from core.occurrences.models import Occurrence
 
 class Weather(models.Model):
     date = models.DateField()
