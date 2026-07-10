@@ -26,6 +26,7 @@ from rest_framework_simplejwt.views import (
 )
 from core.users.presentation.auth_views import EmailTokenObtainPairView
 from core.uploader.router import router as uploader_router
+from core.sync.export import ExportView
 
 router = DefaultRouter()
 
@@ -52,6 +53,7 @@ urlpatterns = [
         "api/floods_point/", include("core.flood_point_registering.presentation.urls")
     ),
     path("api/blog/", include("core.blog.presentation.urls")),
+    path("api/export/", ExportView.as_view(), name="export-data"),
 ]
 
 if settings.DEBUG:

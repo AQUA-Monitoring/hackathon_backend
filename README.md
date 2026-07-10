@@ -1,313 +1,197 @@
 <div align="center">
 
-# hackathon_backend
+# Aqua - Backend
 
-Backend Django/DRF com monitoração de enchentes via câmeras, previsão do tempo, ocorrências, cadastro de pontos de alagamento, upload e gerenciamento de usuários. Orquestrado com Celery + Redis e Postgres. Pronto para rodar com Docker Compose.
+Backend Django/DRF com monitoração de enchentes via câmeras, previsão do tempo, ocorrências, cadastro de pontos de alagamento, upload e gerenciamento de usuários. Orquestrado com Celery + Redis e Postgres via Docker Compose.
 
 </div>
 
-—
+---
 
-Sumário
+## Arquitetura Dual-Instance (Dev + Prod)
 
-- Visão geral
-- Arquitetura e stack
-- Requisitos
-- Início rápido (Docker) — recomendado
-- Desenvolvimento local (sem Docker) — opcional
-- Variáveis de ambiente (.env)
-- Banco de dados e migrações
-- Tarefas assíncronas (Celery/Beat)
-- Endpoints e autenticação
-- Estrutura do projeto
-- Deploy (produção)
-- Solução de problemas (FAQ)
-- Licença
+O projeto suporta duas instâncias independentes rodando no mesmo computador sem conflitos:
 
-## Visão geral
+| Aspecto | Desenvolvimento | Produção |
+|---|---|---|
+| **Diretório** | `~/apps/aqua-dev/` | `~/apps/aqua-prod/` |
+| **Projeto Docker** | `aqua-dev` | `aqua-prod` |
+| **Porta Web** | `8001` | `8000` |
+| **Porta DB** | `5434` | `5433` |
+| **Volumes** | `aqua-dev_pgdata`, `aqua-dev_media` | `aqua-prod_pgdata`, `aqua-prod_media` |
+| **Rede** | `aqua-dev_default` | `aqua-prod_default` |
+| **Banco** | `aqua_dev` | `aqua_prod` |
+| **Compose** | `docker compose up` | `docker compose -f compose.yml -f compose.prod.yml up -d` |
 
-Este projeto fornece uma API para:
+Cada instância é um clone independente do repositório, com seu próprio `.env`, volumes e containers.
 
-- Monitoração de enchentes por câmeras, com processamento de imagens e agendamento de análises.
-- Consulta de clima e previsão do tempo.
-- Registro e consulta de ocorrências.
-- Cadastro de pontos de alagamento.
-- Uploads e gestão de mídia.
-- Autenticação e gerenciamento de usuários.
+---
 
-Principais apps em `core/`:
+## Início Rápido
 
-- `users`, `weather`, `forecast`, `occurrences`, `flood_camera_monitoring`, `flood_point_registering`, `uploader`, `addressing`, `donation`.
+### 1. Clonar o repositório (duas cópias)
 
-## Arquitetura e stack
+```bash
+# Produção
+git clone <repo-url> ~/apps/aqua-prod
+cd ~/apps/aqua-prod
+git checkout main
 
-- Framework: Django 5.2 + Django REST Framework
-- Auth: JWT (djangorestframework-simplejwt) com view customizada por e-mail/senha
-- Tarefas: Celery 5 + Redis (broker e result backend) + django-celery-beat (agendador)
-- Banco: PostgreSQL
-- Mídia/estáticos: `MEDIA_ROOT` em volume Docker; `STATIC_ROOT` = `staticfiles`
-- Processamento: OpenCV, Torch (CPU), scikit-learn
-- Geoespacial: GeoPandas, Shapely, PROJ, GDAL (dependências via imagem Docker)
-- Conteinerização: Docker/Docker Compose
-
-Serviços no Docker Compose (`docker/docker-compose.yml`):
-
-- `web`: Django em modo dev (runserver) ouvindo 0.0.0.0:8000
-- `worker`: Celery worker
-- `beat`: Celery beat (agendador)
-- `redis`: Redis
-- `db`: Postgres (exposto na máquina host em 5433)
-
-Volumes nomeados externos (dev): `docker_pgdata` (Postgres) e `docker_media` (arquivos de mídia).
-
-## Requisitos
-
-Recomendado:
-
-- Docker e Docker Compose
-
-Opcional (para rodar localmente sem Docker):
-
-- Python 3.13
-- Postgres 16+
-- Redis 7+
-- Bibliotecas do sistema para GDAL/GEOS/PROJ, OpenCV e ffmpeg (o Docker já provê isso)
-
-## Início rápido (Docker) — recomendado
-
-1) Crie os volumes externos uma única vez:
-
-   docker volume create docker_pgdata
-   docker volume create docker_media
-
-2) Copie o arquivo de exemplo e ajuste as variáveis:
-
-  ```bash
-  cp .env.sample .env
-  ```
-
-3) Suba os serviços (a partir da pasta `docker/` ou informando o arquivo compose explicitamente):
-
-  # opção A: executar de dentro da pasta docker/
-  ```bash
-  cd docker
-  docker compose up -d --build
-  ```
-
-  # opção B: de qualquer lugar, informando o compose
-  ```bash
-  docker compose -f docker/docker-compose.yml up -d --build
-  ```
-
-4) Aplique migrações e crie um superusuário:
-
-  ```bash
-  docker compose -f docker/docker-compose.yml exec web python manage.py migrate
-  docker compose -f docker/docker-compose.yml exec web python manage.py createsuperuser
-  ```
-
-5) Acesse:
-
-- API: http://localhost:8000/
-- Admin: http://localhost:8000/admin/
-
-Logs úteis:
-
-- Web:
-  ```bash
-  docker compose -f docker/docker-compose.yml logs -f web
-  ```
-- Worker:
-  ```bash
-  docker compose -f docker/docker-compose.yml logs -f worker
-  ```
-- Beat:
-  ```bash
-  docker compose -f docker/docker-compose.yml logs -f beat
-  ```
-
-Parar tudo:
-
-  ```bash
-  docker compose -f docker/docker-compose.yml down
-  ```
-
-## Desenvolvimento local 
-
-1) Crie e ative um ambiente virtual Python 3.13:
-
-  ```bash
-  python3.13 -m venv .venv
-  source .venv/bin/activate
-  ```
-
-2) Instale dependências Python (pode exigir libs de sistema avançadas; prefira Docker se encontrar erros):
-
-  ```bash
-  pip install --upgrade pip
-  pip install -r requirements.txt
-  ```
-
-3) Configure e suba Postgres e Redis locais, ou use `DATABASE_URL`, `CELERY_BROKER_URL` e `CELERY_RESULT_BACKEND` apontando para serviços disponíveis.
-
-4) Crie o arquivo `.env` (veja abaixo), execute migrações e rode o servidor:
-
-  ```bash
-  python manage.py migrate
-  python manage.py runserver 0.0.0.0:8000
-  ```
-
-Worker/Beat localmente (outros terminais):
-
-  ```bash
-  celery -A config worker -l info
-  celery -A config beat -l info
-  ```
-
-## Variáveis de ambiente (.env)
-
-Exemplo seguro de `.env` (use `cp .env.sample .env` e ajuste os valores):
-
-```dotenv
-# Django
-DJANGO_SETTINGS_MODULE=config.settings
-DEBUG=1
-DJANGO_SECRET_KEY=<defina-uma-chave-forte>
-
-# Banco de Dados (use APENAS UMA das opções)
-# Opção A: DATABASE_URL tem precedência quando definido
-# Formato: postgresql://<usuario>:<senha>@<host>:<porta>/<nome_db>
-DATABASE_URL=postgresql://<db_user>:<db_password>@db:5432/<db_name>
-
-# Opção B: Variáveis individuais do Postgres (se DATABASE_URL estiver vazio)
-POSTGRES_USER=<db_user>
-POSTGRES_PASSWORD=<db_password>
-POSTGRES_DB=<db_name>
-POSTGRES_HOST=db
-POSTGRES_PORT=5432
-
-# Celery / Redis
-CELERY_BROKER_URL=redis://redis:6379/0
-CELERY_RESULT_BACKEND=redis://redis:6379/1
-REDIS_CACHE_URL=redis://redis:6379/2
-
-# JWT (opcional)
-JWT_ACCESS_MINUTES=60
-JWT_REFRESH_DAYS=7
-JWT_ALGORITHM=HS256
-
-# API
-API_PAGE_SIZE=20
-
-# Outros
-CAMERA_INSTALL_URL=
-TZ=America/Sao_Paulo
+# Desenvolvimento
+git clone <repo-url> ~/apps/aqua-dev
+cd ~/apps/aqua-dev
+git checkout develop
 ```
 
-Observações:
+### 2. Configurar ambiente
 
-- Em `config/settings.py`, `DEBUG` está como `True` por padrão. Ajuste para produção.
-- CORS/CSRF já permitem origens de desenvolvimento e domínios institucionais conhecidos. Para produção, refine listas conforme necessário.
+```bash
+cd ~/apps/aqua-dev
+cp .env.sample.dev .env
+# Editar .env com suas credenciais de dev
 
-## Banco de dados e migrações
+cd ~/apps/aqua-prod
+cp .env.sample.prod .env
+# Editar .env com credenciais reais de produção
+```
 
-- Aplique migrações sempre que atualizar o código:
+### 3. Subir os serviços
 
-  python manage.py migrate
+```bash
+# Desenvolvimento (override carregado automaticamente)
+cd ~/apps/aqua-dev
+docker compose -p aqua-dev up --build
 
-- Para criar novas migrações:
+# Produção (sempre rodando)
+cd ~/apps/aqua-prod
+docker compose -p aqua-prod -f compose.yml -f compose.prod.yml up -d --build
+```
 
-  python manage.py makemigrations
+### 4. Migrações e superusuário
 
-- No Docker, prefixe os comandos com `docker compose exec web ...` conforme mostrado no Início rápido.
+```bash
+docker compose -p aqua-dev exec web python manage.py migrate
+docker compose -p aqua-dev exec web python manage.py createsuperuser
+```
 
-Portas e acesso (Docker):
+---
 
-- Postgres roda no contêiner na 5432 e é exposto no host em 5433. Para clientes locais utilize host `localhost` e porta `5433` (credenciais do seu `.env`).
+## Mapeamento de Portas
 
-## Tarefas assíncronas (Celery/Beat)
+| Serviço | Container | Dev | Prod |
+|---|---|---|---|
+| **Django API** | `8090` | `8001` | `8000` |
+| **PostgreSQL** | `5432` | `5434` | `5433` |
+| **Redis** | `6379` | _(não exposta)_ | _(não exposta)_ |
+| **Worker/Beat** | — | _(sem porta)_ | _(sem porta)_ |
 
-- Worker: processa tarefas; Beat: agenda tarefas periódicas.
-- Agendamento padrão no settings inclui (a cada 300s):
+---
 
-  task: core.flood_camera_monitoring.infra.tasks.analyze_all_cameras_task
-  schedule: 300 segundos
+## Arquivos de Composição
 
-- O projeto usa `django-celery-beat` como scheduler (tabelas precisam existir). O código faz fallback para um scheduler persistente se as tabelas ainda não existirem, evitando crash no primeiro start. Ainda assim, aplique migrações.
-- Exemplo de tarefa utilitária: `core/flood_camera_monitoring/tasks.py::refresh_all_and_cache_task`, que executa análise unificada e popula cache Redis.
+| Arquivo | Função |
+|---|---|
+| `compose.yml` | Base compartilhada (build, depends_on, volumes nomeados) |
+| `compose.override.yml` | Override dev (portas interpoladas, bind mount para hot reload) — **auto-load** |
+| `compose.prod.yml` | Override prod (portas fixas, restart policies, volumes nomeados) |
 
-## Endpoints e autenticação
+### Uso
 
-Base de rotas (veja `config/urls.py`):
+```bash
+# Dev (override auto-load)
+docker compose -p aqua-dev up
 
-- Admin: `GET /admin/`
-- Auth JWT:
-  - `POST /api/auth/token/` — autentica por e-mail/senha e retorna access/refresh
-  - `POST /api/auth/token/refresh/`
-- Módulos:
-  - `GET/POST /api/users/...`
-  - `GET/POST /api/weather/...`
-  - `GET/POST /api/forecast/...`
-  - `GET/POST /api/occurrences/...`
-  - `GET/POST /api/flood_monitoring/...`
-  - `GET/POST /api/upload/...`
-  - `GET/POST /api/addressing/...`
-  - `GET/POST /api/donate/...`
-  - `GET/POST /api/floods_point/...`
+# Prod (override explícito)
+docker compose -p aqua-prod -f compose.yml -f compose.prod.yml up -d
+```
 
-Autenticação:
+---
 
-- Envie o header `Authorization: Bearer <ACCESS_TOKEN>` nas rotas protegidas.
-- Duração padrão dos tokens é configurável via `.env` (veja seção JWT).
+## Comandos Comuns
 
-## Estrutura do projeto
+```bash
+# Ver logs
+docker compose -p aqua-dev logs -f web
+docker compose -p aqua-dev logs -f worker
 
-Raiz (principais itens):
+# Executar comandos no container
+docker compose -p aqua-dev exec web python manage.py migrate
+docker compose -p aqua-dev exec web python manage.py createsuperuser
 
-- `config/` — settings, urls, wsgi/asgi, celery, paginação
-- `core/` — apps de domínio (users, weather, forecast, occurrences, flood_camera_monitoring, etc.)
-- `docker/` — Dockerfiles alternativos e `docker-compose.yml`
-- `manage.py` — utilitário Django
-- `requirements.txt` — dependências pinadas para build
-- `pyproject.toml` — metadados do projeto e scripts PDM (opcional para dev)
-- `Procfile` — perfil para plataformas tipo Heroku (web/worker/beat)
+# Parar
+docker compose -p aqua-dev down
 
-## Deploy (produção)
+# Reconstruir imagem
+docker compose -p aqua-dev up --build
 
-Você pode construir com o `Dockerfile` da raiz (multi-stage, com Gunicorn):
+# Ver volumes
+docker volume ls | grep aqua
+```
 
-- Expõe a aplicação WSGI via `gunicorn config.wsgi:application` (ver `Procfile`).
-- Espera a variável `PORT` no ambiente (ou ajuste o comando no `Dockerfile`).
-- Executa `collectstatic` durante o build (ignora se não houver estáticos).
+---
 
-Diretrizes rápidas:
+## Variáveis de Ambiente
 
-- Ajuste `DEBUG=False`, `ALLOWED_HOSTS` e CORS/CSRF para seus domínios.
-- Forneça `DJANGO_SECRET_KEY` seguro.
-- Aponte `DATABASE_URL`, `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND` para serviços gerenciados.
-- Configure armazenamento de mídia (S3, GCS, etc.) para ambientes distribuídos.
+Cada clone tem seu próprio `.env`. Use os samples como template:
 
-Alternativamente, o compose de dev usa `docker/Dockerfile.slim` com `runserver`. Para produção, prefira o `Dockerfile` raiz ou uma imagem própria baseada nele.
+| Sample | Ambiente | Portas |
+|---|---|---|
+| `.env.sample.dev` | Desenvolvimento | `WEB_PORT=8001`, `DB_PORT=5434` |
+| `.env.sample.prod` | Produção | `WEB_PORT=8000`, `DB_PORT=5433` |
 
-## Solução de problemas (FAQ)
+Principais variáveis:
 
-- Erro: ImproperlyConfigured: DJANGO_SECRET_KEY environment variable is not set
-  - Garanta que seu `.env` na raiz defina `DJANGO_SECRET_KEY` e que o compose referencie `../.env`.
+| Variável | Descrição |
+|---|---|
+| `DEBUG` | `1` para dev, `0` para produção |
+| `DJANGO_SECRET_KEY` | Chave secreta (gerar com `python -c "import secrets; print(secrets.token_urlsafe(64))"`) |
+| `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | Credenciais do banco |
+| `CELERY_BROKER_URL` | Redis (default: `redis://redis:6379/0`) |
+| `WEB_PORT` | Porta host para o Django |
+| `DB_PORT` | Porta host para o PostgreSQL |
+| `ACCESS_TOKEN` | Token Mercado Pago |
+| `FLOOD_MODEL_DRIVE_ID` | ID do modelo ML no Google Drive |
+| `API_URL` | URL da API para sync remoto |
 
-- Tabelas do django_celery_beat ausentes / Beat não agenda
-  - Rode migrações. O código tenta fallback para um scheduler persistente, mas o ideal é aplicar as migrações do `django_celery_beat`.
+---
 
-- Erros ao instalar GDAL/GEOS/PROJ localmente
-  - Use Docker (recomendado). Se insistir local, instale bibliotecas do sistema correspondentes à sua distro.
+## Estrutura do Projeto
 
-- CORS/CSRF bloqueando requisições no front
-  - Ajuste origens permitidas em `CORS_ALLOWED_ORIGINS`/`CSRF_TRUSTED_ORIGINS` no settings.
+```
+├── compose.yml              # Docker Compose base
+├── compose.override.yml     # Dev overrides (auto-load)
+├── compose.prod.yml         # Prod overrides
+├── Dockerfile               # Multi-stage production (Gunicorn — usado pelo Dokku)
+├── Dockerfile.slim          # Slim image (usada pelo Docker Compose local)
+├── requirements.runtime.txt # Dependências para a slim image
+├── .dockerignore            # Regras de exclusão do build Docker
+├── requirements.txt         # Dependências pinadas
+├── pyproject.toml           # Metadados e scripts PDM
+├── Procfile                 # Perfil Heroku/Dokku
+├── config/                  # Django settings, urls, wsgi, celery
+├── core/                    # Apps: users, weather, forecast, occurrences, etc.
+├── .env.sample.dev          # Template para dev
+└── .env.sample.prod         # Template para produção
+```
 
-- Postgres inacessível do host
-  - No compose, use `localhost:5433` (e não 5432). Dentro dos contêineres, o host é `db:5432`.
+---
 
-## Licença
+## Deploy (Dokku)
 
-MIT (veja `pyproject.toml`).
+O deploy real de produção é feito via GitHub Actions para Dokku:
 
+```yaml
+# .github/workflows/deploy.yml
+# Push na branch main → ssh para dokku@app2.fabricadesoftware.ifc.edu.br
+```
 
+O `Dockerfile` da raiz (multi-stage com Gunicorn) é usado pelo Dokku, não pelo Compose local.
+
+---
+
+## Solução de Problemas
+
+- **Porta ocupada**: Ajuste `WEB_PORT` e `DB_PORT` no `.env`
+- **Conflito de volumes**: Use `-p aqua-prod` / `-p aqua-dev` para isolar nomes
+- **Healthcheck DB falhando**: Verifique se `POSTGRES_USER` no `.env` corresponde ao usuário do healthcheck
+- **Migrações pendentes**: `docker compose exec web python manage.py migrate`
