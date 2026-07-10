@@ -1,0 +1,10 @@
+services:
+  web:
+    ports:
+      - "${WEB_PORT:-8001}:8090"
+    volumes:
+      - .:/app
+
+  db:
+    ports:
+      - "${DB_PORT:-5434}:5432"

@@ -1,0 +1,70 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.slim
+    command: ["python", "manage.py", "runserver", "0.0.0.0:8090"]
+    env_file:
+      - ./.env
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    volumes:
+      - media:/app/media
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.slim
+    command: ["python", "-m", "celery", "-A", "config", "worker", "-l", "info"]
+    env_file:
+      - ./.env
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    volumes:
+      - media:/app/media
+
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile.slim
+    command: ["python", "-m", "celery", "-A", "config", "beat", "-l", "info"]
+    env_file:
+      - ./.env
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    volumes:
+      - media:/app/media
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  db:
+    image: postgres:16-alpine
+    env_file:
+      - ./.env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "aqua_dev"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
+  media:

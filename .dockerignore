@@ -1,0 +1,67 @@
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+### Django ###
+*.log
+*.pot
+*.pyc
+__pycache__/
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media/
+
+
+# Flood camera monitoring train data
+./core/flood_camera_monitoring/data/
+# Exclude local ML checkpoints; they are downloaded at runtime via gdown
+./core/flood_camera_monitoring/infra/machine_model/
+
+# Big/temporary folders
+__pypackages__/
+node_modules/
+dist/
+build/
+site-packages/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.cache/
+
+# VCS/editor
+.git/
+.github/
+.vscode/
+.idea/
+.gitignore
+.gitattributes
+
+# Artifacts and datasets
+*.ipynb
+*.pt
+*.pth
+*.onnx
+*.npz
+*.npy
+*.h5
+*.tar
+*.gz
+*.zip
+*.csv
+*.parquet
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.pdf
+
+# Compiled/Python cache
+**/*.py[cod]
+**/*.so
+
