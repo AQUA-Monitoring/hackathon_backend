@@ -20,6 +20,8 @@ services:
 
 volumes:
   pgdata:
-    name: aqua_prod_pgdata
+    external: true
+    name: docker_pgdata
   media:
-    name: aqua_prod_media
+    external: true
+    name: docker_media

@@ -41,6 +41,7 @@ RUN apt-get update && apt-get install -y \
     libgeos-c1v5 \
     libspatialindex6 \
     libpq5 \
+    libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
