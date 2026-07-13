@@ -42,10 +42,6 @@ urlpatterns = [
     path("api/weather/", include("core.weather.presentation.urls")),
     path("api/forecast/", include("core.forecast.presentation.urls")),
     path("api/occurrences/", include("core.occurrences.presentation.urls")),
-    path(
-        "api/flood_monitoring/",
-        include("core.flood_camera_monitoring.presentation.urls"),
-    ),
     path("api/upload/", include(uploader_router.urls)),
     path("api/addressing/", include("core.addressing.presentation.urls")),
     path("api/donate/", include("core.donate.presentation.urls")),
@@ -55,6 +51,13 @@ urlpatterns = [
     path("api/blog/", include("core.blog.presentation.urls")),
     path("api/export/", ExportView.as_view(), name="export-data"),
 ]
+
+flood_camera_urls = (
+    "core.flood_camera_monitoring.presentation.proxy_urls"
+    if settings.FLOOD_CAMERA_API_MODE == "proxy"
+    else "core.flood_camera_monitoring.presentation.urls"
+)
+urlpatterns.append(path("api/flood_monitoring/", include(flood_camera_urls)))
 
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

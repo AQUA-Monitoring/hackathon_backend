@@ -96,7 +96,28 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-ROOT_URLCONF = "config.urls"
+ROOT_URLCONF = os.getenv("DJANGO_ROOT_URLCONF", "config.urls")
+
+# Flood camera runtime. Production remains direct by default; the lightweight
+# development web container overrides this to proxy requests to `flood-api`.
+FLOOD_CAMERA_API_MODE = os.getenv("FLOOD_CAMERA_API_MODE", "direct").strip().lower()
+if FLOOD_CAMERA_API_MODE not in {"direct", "proxy"}:
+    raise ImproperlyConfigured(
+        "FLOOD_CAMERA_API_MODE must be either 'direct' or 'proxy'"
+    )
+
+FLOOD_CAMERA_SERVICE_URL = os.getenv(
+    "FLOOD_CAMERA_SERVICE_URL", "http://flood-api:8091"
+).rstrip("/")
+FLOOD_CAMERA_PROXY_CONNECT_TIMEOUT_SECONDS = float(
+    os.getenv("FLOOD_CAMERA_PROXY_CONNECT_TIMEOUT_SECONDS", "2")
+)
+FLOOD_CAMERA_PROXY_READ_TIMEOUT_SECONDS = float(
+    os.getenv("FLOOD_CAMERA_PROXY_READ_TIMEOUT_SECONDS", "120")
+)
+FLOOD_CAMERA_DEDICATED_QUEUE = (
+    os.getenv("FLOOD_CAMERA_DEDICATED_QUEUE", "0") == "1"
+)
 
 TEMPLATES = [
     {
@@ -201,6 +222,13 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": 300.00,
     },
 }
+
+# Development routes the optional module away from the lightweight general
+# worker. Production keeps the existing default queue unless explicitly set.
+if FLOOD_CAMERA_DEDICATED_QUEUE:
+    CELERY_TASK_ROUTES = {
+        "core.flood_camera_monitoring.*": {"queue": "flood_camera"},
+    }
 
 # Logging: ensure our modules and Celery log to console at INFO level
 LOGGING = {

@@ -1,4 +1,4 @@
-FROM python:3.13-slim
+FROM python:3.13-slim AS common
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -6,10 +6,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# System libs for OpenCV + Geo stack (GDAL/GEOS/PROJ) + build essentials (removed later)
+# Base system libraries used by Django and the Geo stack.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libglib2.0-0 libsm6 libxrender1 libxext6 libgl1 \
-    ffmpeg \
     gdal-bin libgdal-dev \
     libgeos-dev \
     libmagic1 \
@@ -17,12 +15,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential gcc && \
     rm -rf /var/lib/apt/lists/*
 
-# Install runtime Python deps (CPU-only torch/vision)
-COPY requirements.runtime.txt /tmp/requirements.txt
+# Install the lightweight runtime shared by the main API, general worker and beat.
+COPY requirements.runtime.base.txt /tmp/requirements.runtime.base.txt
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r /tmp/requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+    pip install --no-cache-dir -r /tmp/requirements.runtime.base.txt
 
-# Copy only what’s needed at runtime to minimize context
+
+FROM common AS base
+
 COPY manage.py ./
 COPY config ./config
 COPY core ./core
@@ -32,3 +32,46 @@ EXPOSE 8090
 ENV DJANGO_SETTINGS_MODULE=config.settings
 
 CMD ["python", "manage.py", "runserver", "0.0.0.0:8090"]
+
+
+FROM common AS flood-dependencies
+
+# Video capture/inference dependencies are intentionally absent from `base`.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libglib2.0-0 libsm6 libxrender1 libxext6 libgl1 \
+    ffmpeg && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY requirements.runtime.flood.txt /tmp/requirements.runtime.flood.txt
+RUN pip install --no-cache-dir \
+    -r /tmp/requirements.runtime.flood.txt \
+    --extra-index-url https://download.pytorch.org/whl/cpu
+
+
+FROM flood-dependencies AS flood
+
+COPY manage.py ./
+COPY config ./config
+COPY core ./core
+
+EXPOSE 8091
+
+ENV DJANGO_SETTINGS_MODULE=config.settings
+
+CMD ["python", "manage.py", "runserver", "0.0.0.0:8091"]
+
+
+FROM common AS demo
+
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY manage.py ./
+COPY config ./config
+COPY core ./core
+
+ENV DJANGO_SETTINGS_MODULE=config.settings
+
+
+# Keep the complete image as the default final target for production Compose.
+FROM flood AS full

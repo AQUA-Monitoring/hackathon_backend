@@ -1,0 +1,7 @@
+opencv-python-headless>=4.8.0.76
+gdown>=5.2.0,<6.0.0
+
+# Force CPU-only PyTorch wheels. Docker installs this file with the
+# official CPU wheel index as an additional package source.
+torch==2.8.0
+torchvision==0.23.0

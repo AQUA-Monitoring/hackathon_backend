@@ -2,7 +2,7 @@
 
 # Aqua - Backend
 
-Backend Django/DRF com monitoração de enchentes via câmeras, previsão do tempo, ocorrências, cadastro de pontos de alagamento, upload e gerenciamento de usuários. Orquestrado com Celery + Redis e Postgres via Docker Compose.
+Backend Django/DRF com monitoração de enchentes via câmeras, previsão do tempo, ocorrências, cadastro de pontos de alagamento, upload e gerenciamento de usuários. Orquestrado com Celery + Redis e Postgres via Docker Compose. Em desenvolvimento, o processamento de câmeras é opcional para manter o ambiente padrão leve.
 
 </div>
 
@@ -21,7 +21,7 @@ O projeto suporta duas instâncias independentes rodando no mesmo computador sem
 | **Volumes** | `aqua-dev_pgdata`, `aqua-dev_media` | `aqua-prod_pgdata`, `aqua-prod_media` |
 | **Rede** | `aqua-dev_default` | `aqua-prod_default` |
 | **Banco** | `aqua_dev` | `aqua_prod` |
-| **Compose** | `docker compose up` | `docker compose -f compose.yml -f compose.prod.yml up -d` |
+| **Compose** | `docker compose up` | `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d` |
 
 Cada instância é um clone independente do repositório, com seu próprio `.env`, volumes e containers.
 
@@ -64,8 +64,25 @@ docker compose -p aqua-dev up --build
 
 # Produção (sempre rodando)
 cd ~/apps/aqua-prod
-docker compose -p aqua-prod -f compose.yml -f compose.prod.yml up -d --build
+docker compose -p aqua-prod -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
+
+### Perfis opcionais de desenvolvimento
+
+O comando padrão não instala nem inicia PyTorch, OpenCV, FFmpeg, análises de câmeras ou o demo. A API principal continua disponível e responde `503` em `/api/flood_monitoring/` enquanto o serviço opcional estiver desligado.
+
+```bash
+# API, worker geral, PostgreSQL e Redis (sem flood monitoring)
+docker compose -p aqua-dev up --build
+
+# Adiciona API de câmeras, worker dedicado e agendador
+docker compose -p aqua-dev --profile flood up --build
+
+# Flood monitoring e demo, ambos explicitamente habilitados
+docker compose -p aqua-dev --profile flood --profile demo up --build
+```
+
+O perfil `demo` também pode ser iniciado sozinho quando for necessário apenas validar o stream. O perfil `flood` nunca inicia o demo implicitamente.
 
 ### 4. Migrações e superusuário
 
@@ -91,9 +108,9 @@ docker compose -p aqua-dev exec web python manage.py createsuperuser
 
 | Arquivo | Função |
 |---|---|
-| `compose.yml` | Base compartilhada (build, depends_on, volumes nomeados) |
-| `compose.override.yml` | Override dev (portas interpoladas, bind mount para hot reload) — **auto-load** |
-| `compose.prod.yml` | Override prod (portas fixas, restart policies, volumes nomeados) |
+| `docker-compose.yml` | Base compartilhada (build, depends_on, volumes nomeados) |
+| `docker-compose.override.yml` | Override dev (portas interpoladas, bind mount para hot reload) — **auto-load** |
+| `docker-compose.prod.yml` | Override prod (portas fixas, restart policies, volumes nomeados) |
 
 ### Uso
 
@@ -102,7 +119,7 @@ docker compose -p aqua-dev exec web python manage.py createsuperuser
 docker compose -p aqua-dev up
 
 # Prod (override explícito)
-docker compose -p aqua-prod -f compose.yml -f compose.prod.yml up -d
+docker compose -p aqua-prod -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 
 ---
@@ -147,6 +164,9 @@ Principais variáveis:
 | `DJANGO_SECRET_KEY` | Chave secreta (gerar com `python -c "import secrets; print(secrets.token_urlsafe(64))"`) |
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | Credenciais do banco |
 | `CELERY_BROKER_URL` | Redis (default: `redis://redis:6379/0`) |
+| `FLOOD_CAMERA_API_MODE` | `direct` em produção; `proxy` no web leve de desenvolvimento |
+| `FLOOD_CAMERA_SERVICE_URL` | Endereço interno do serviço opcional (default: `http://flood-api:8091`) |
+| `FLOOD_CAMERA_DEDICATED_QUEUE` | Usa a fila isolada `flood_camera` quando definido como `1` |
 | `WEB_PORT` | Porta host para o Django |
 | `DB_PORT` | Porta host para o PostgreSQL |
 | `ACCESS_TOKEN` | Token Mercado Pago |
@@ -158,9 +178,9 @@ Principais variáveis:
 ## Estrutura do Projeto
 
 ```
-├── compose.yml              # Docker Compose base
-├── compose.override.yml     # Dev overrides (auto-load)
-├── compose.prod.yml         # Prod overrides
+├── docker-compose.yml              # Docker Compose base
+├── docker-compose.override.yml     # Dev overrides (auto-load)
+├── docker-compose.prod.yml         # Prod overrides
 ├── Dockerfile               # Multi-stage production (Gunicorn — usado pelo Dokku)
 ├── Dockerfile.slim          # Slim image (usada pelo Docker Compose local)
 ├── requirements.runtime.txt # Dependências para a slim image
