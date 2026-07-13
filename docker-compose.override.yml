@@ -1,10 +1,43 @@
 services:
   web:
-    ports:
-      - "${WEB_PORT:-8001}:8090"
+    command: ["python", "manage.py", "runserver", "0.0.0.0:8001"]
+    depends_on:
+      demo-stream:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/', timeout=2)",
+        ]
+      interval: 6h
+      start_interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+    ports: !override
+      - "${WEB_PORT:-8001}:8001"
     volumes:
       - .:/app
 
+  demo-stream:
+    profiles: !reset []
+    depends_on:
+      db:
+        condition: service_healthy
+
   db:
+    healthcheck:
+      interval: 6h
+      start_interval: 5s
+      start_period: 20s
     ports:
       - "${DB_PORT:-5434}:5432"
+
+  redis:
+    healthcheck:
+      interval: 6h
+      start_interval: 5s
+      start_period: 20s

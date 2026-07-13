@@ -6,10 +6,11 @@ authors = [
     {name = "nicolefemello", email = "nicfmello@gmail.com"},
 ]
 dependencies = [
-    "django>=5.2.3",
+    "django>=5.2.5,<6.0",
     "djangorestframework>=3.16.0",
     "djangorestframework-simplejwt>=5.3.1",
     "redis>=6.4.0",
+    "sentry-sdk>=2.54.0",
     "celery>=5.5.3",
     "django-celery-beat>=2.7.0",
     "dotenv>=0.9.9",
@@ -49,7 +50,7 @@ distribution = false
 
 [tool.pdm.scripts]
 dev = "python manage.py runserver"
-demo = python manage.py migrate && python manage.py prewarm_hls
+demo = "python manage.py migrate && python manage.py prewarm_hls"
 migrate = "python manage.py migrate"
 makemigrations = "python manage.py makemigrations"
 createsuperuser = "python manage.py createsuperuser"

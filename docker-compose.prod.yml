@@ -1,5 +1,18 @@
 services:
   web:
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health/', timeout=2)",
+        ]
+      interval: 30s
+      start_interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
     ports:
       - "8000:8090"
     restart: unless-stopped
@@ -11,9 +24,17 @@ services:
     restart: unless-stopped
 
   redis:
+    healthcheck:
+      interval: 30s
+      start_interval: 5s
+      start_period: 20s
     restart: unless-stopped
 
   db:
+    healthcheck:
+      interval: 30s
+      start_interval: 5s
+      start_period: 20s
     ports:
       - "5433:5432"
     restart: unless-stopped
