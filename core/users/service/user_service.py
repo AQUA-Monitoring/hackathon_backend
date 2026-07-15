@@ -110,6 +110,11 @@ class UsersService:
             "name": user.name,
             "type": user.type,
             "email": user.email,
+            "profile_picture_id": (
+                str(user.profile_picture.attachment_key)
+                if user.profile_picture
+                else None
+            ),
             "profile_picture": (
                 user.profile_picture.url
                 if user.profile_picture

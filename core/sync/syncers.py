@@ -1,7 +1,9 @@
 import logging
+from pathlib import Path
+from urllib.parse import urlsplit
 from uuid import UUID
 
-from django.db import transaction
+from django.core.files.base import ContentFile
 from django.utils.dateparse import parse_date, parse_datetime
 
 from core.addressing.infra.models import City, Neighborhood, Region
@@ -11,7 +13,9 @@ from core.flood_point_registering.infra.models import Flood_Point_Register
 from core.forecast.infra.models import Forecast
 from core.occurrences.infra.models import Occurrence
 from core.users.infra.models import User
+from core.uploader.models import Image
 from core.weather.infra.models import Weather
+from core.sync.client import fetch_file
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +58,51 @@ def _resolve_status(status_value: str | int | None, mapping: dict[str, int]) -> 
     if isinstance(status_value, int):
         return status_value
     return mapping.get(str(status_value).strip())
+
+
+def sync_images(data: list, token: str) -> tuple[int, int]:
+    """Import media before entities that reference ``Image.attachment_key``.
+
+    Existing files are deliberately not downloaded again: an attachment key is
+    immutable in the application and re-uploading an image creates a new key.
+    This makes repeated syncs cheap and avoids leaving obsolete files in the
+    configured Django storage.
+    """
+    created = 0
+    updated = 0
+
+    for item in data:
+        attachment_key = _safe_uuid(item.get("attachment_key"))
+        file_url = item.get("url")
+        if not attachment_key or not isinstance(file_url, str) or not file_url:
+            logger.warning("Imagem ignorada: attachment_key ou url inválido")
+            continue
+
+        image = Image.objects.filter(attachment_key=attachment_key).first()
+        if image and image.file.name:
+            description = item.get("description") or ""
+            if image.description != description:
+                image.description = description
+                image.save(update_fields=["description"])
+                updated += 1
+            continue
+
+        payload = fetch_file(file_url, token)
+        filename = Path(urlsplit(file_url).path).name or f"{attachment_key}.img"
+        description = item.get("description") or ""
+
+        if image is None:
+            image = Image(attachment_key=attachment_key, description=description)
+            image.file.save(filename, ContentFile(payload), save=False)
+            image.save()
+            created += 1
+        else:
+            image.description = description
+            image.file.save(filename, ContentFile(payload), save=False)
+            image.save(update_fields=["description", "file"])
+            updated += 1
+
+    return created, updated
 
 
 def sync_addressing(data: list | dict, token: str) -> tuple[int, int]:
@@ -143,6 +192,14 @@ def sync_users(data: list, token: str) -> tuple[int, int]:
         profile_pic_url = item.get("profile_picture")
         if profile_pic_url and isinstance(profile_pic_url, str):
             defaults["profile_picture_url"] = profile_pic_url
+
+        profile_picture_id = _safe_uuid(item.get("profile_picture_id"))
+        if profile_picture_id:
+            profile_picture = Image.objects.filter(
+                attachment_key=profile_picture_id
+            ).first()
+            if profile_picture:
+                defaults["profile_picture"] = profile_picture
 
         password = item.get("password")
         if password:
@@ -263,7 +320,6 @@ def sync_posts(data: list, token: str) -> tuple[int, int]:
             if fk_data and isinstance(fk_data, dict):
                 img_id = _safe_uuid(fk_data.get("attachment_key"))
                 if img_id:
-                    from core.uploader.models import Image
                     img = Image.objects.filter(attachment_key=img_id).first()
                     if img:
                         defaults[fk_field] = img

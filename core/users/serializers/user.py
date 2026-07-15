@@ -6,12 +6,17 @@ class UserSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=100)
     email = serializers.EmailField()
     profile_picture = serializers.SerializerMethodField()
+    profile_picture_id = serializers.SerializerMethodField()
 
     @staticmethod
     def get_profile_picture(user):
         if user.profile_picture:
             return user.profile_picture.url
         return user.profile_picture_url or None
+
+    @staticmethod
+    def get_profile_picture_id(user):
+        return user.profile_picture.attachment_key if user.profile_picture else None
 
 
 class SignupSerializer(serializers.Serializer):
