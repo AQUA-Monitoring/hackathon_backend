@@ -1,0 +1,145 @@
+# Operação de containers, Flood Monitoring e demo
+O projeto possui quatro modos de desenvolvimento e uma composição de produção
+isolada. O banco, Redis e os modelos Django de câmeras permanecem no core; o
+que é opcional no desenvolvimento são captura de vídeo, inferência, agenda
+flood e stream da demo.
+
+## Modos de execução
+
+| Modo | Comando | Serviços adicionais |
+|---|---|---|
+| Dev base | docker compose -p aqua-dev up --build | Nenhum: web, worker, db e redis |
+| Dev câmeras | docker compose -p aqua-dev --profile flood up --build | flood-api, flood-worker e beat |
+| Dev demo | docker compose -p aqua-dev --profile demo up --build | demo-stream |
+| Dev câmeras + demo | docker compose -p aqua-dev --profile flood --profile demo up --build | Todos os opcionais |
+| Produção | docker compose -p aqua-prod -f docker-compose.yml -f docker-compose.prod.yml up -d --build | beat e demo-stream são padrão |
+
+No dev base, web e worker usam a imagem base, sem Torch, Torchvision, OpenCV,
+FFmpeg ou download de modelo. As rotas de Flood Monitoring respondem 503
+estável enquanto flood-api estiver desligado.
+
+## Topologia
+
+~~~text
+dev base:
+  web(base) + worker(base) + db + redis
+
+profile flood:
+  web(base) -> flood-api(flood)
+  flood-worker(flood_camera, concorrência 1) + beat(base)
+
+profile demo:
+  demo-stream(demo, HLS 8088, controle interno 8089)
+  web(base) -> demo-stream para status e troca de cenário
+
+produção:
+  web(full, Gunicorn) + worker(full) + beat(full)
+  + demo-stream(demo) + db + redis
+~~~
+
+## Portas e saúde
+
+| Serviço | Host dev | Host produção | Healthcheck |
+|---|---:|---:|---|
+| web | 8001 | 8000 | /health/ verifica somente DB e Redis |
+| db | 5434 | 5433 | pg_isready |
+| redis | não publicada | não publicada | redis-cli ping |
+| demo-stream HLS | 8088 quando o perfil demo está ativo | 8088, padrão | /health na porta interna 8089 |
+| flood-api | interna | incorporada ao web full | /health interno |
+
+Os healthchecks do override de desenvolvimento executam uma verificação inicial
+com intervalo de 20 segundos e, depois de saudável, repetem somente a cada 24
+horas para não poluir os logs. Produção mantém a frequência mais curta.
+
+## Configuração
+
+Crie o ambiente de desenvolvimento:
+
+~~~bash
+cp .env.sample.dev .env
+python -c "import secrets; print(secrets.token_urlsafe(64))"
+~~~
+
+Variáveis principais:
+
+| Variável | Uso |
+|---|---|
+| POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD | Banco usado pelo Django e PostgreSQL |
+| FLOOD_CAMERA_API_MODE | proxy no web leve; direct em flood-api e produção |
+| FLOOD_CAMERA_SERVICE_URL | Endereço interno do flood-api, padrão http://flood-api:8091 |
+| FLOOD_CAMERA_DEDICATED_QUEUE | 1 no dev para usar a fila flood_camera; 0 em produção |
+| DEMO_CONTROL_TOKEN | Obrigatório para iniciar e controlar demo-stream |
+| DEMO_STREAM_PUBLIC_URL | URL HLS consumida pelo navegador |
+| DEMO_STREAM_INTERNAL_URL | Controle interno da demo, http://demo-stream:8089 |
+| DEMO_STREAM_MEDIA_INTERNAL_BASE_URL | Segmentos internos, http://demo-stream:8088 |
+
+Em produção, DEMO_ENABLED é forçado para 1 pela composição e demo-stream sobe
+como serviço normal. Defina um DEMO_CONTROL_TOKEN forte e uma URL pública real
+em .env.sample.prod antes de publicar.
+
+## Demo
+
+demo-stream usa FFmpeg e lê assets de /demo-assets. Em desenvolvimento,
+demo_assets é montado somente para leitura; na produção, os assets são
+incorporados na imagem demo. O cenário deve existir em
+demo_assets/scenario.json e cada vídeo referenciado precisa estar na mesma
+pasta.
+
+~~~bash
+# Stream e API base de controle
+docker compose -p aqua-dev --profile demo up --build
+
+# Testar mídia
+curl -f http://localhost:8088/health
+curl -f http://localhost:8088/hls/playlist.m3u8
+
+# Status e controle pela API
+curl -i http://localhost:8001/api/flood_monitoring/demo
+curl -i -X POST http://localhost:8001/api/flood_monitoring/demo/state \
+  -H 'Authorization: Bearer <JWT_DE_ADMIN>' \
+  -H 'Content-Type: application/json' \
+  --data '{"state":"flooded"}'
+~~~
+
+GET /api/flood_monitoring/demo/predict precisa do perfil flood, pois executa
+inferência no último segmento HLS. Sem flood, retorna 503 sem carregar
+bibliotecas de ML.
+
+## Câmeras e filas
+
+No perfil flood, o gateway web mantém a mesma URL pública
+/api/flood_monitoring/* e encaminha chamadas de inferência para flood-api. O
+worker geral consome somente celery; flood-worker consome somente flood_camera.
+O beat de desenvolvimento só sobe nesse perfil e mantém a análise periódica de
+300 segundos.
+
+~~~bash
+docker compose -p aqua-dev --profile flood up --build
+docker compose -p aqua-dev --profile flood logs -f flood-api flood-worker beat
+~~~
+
+## Rotina operacional
+
+~~~bash
+docker compose -p aqua-dev ps
+docker compose -p aqua-dev logs -f web
+docker compose -p aqua-dev exec web python manage.py migrate
+docker compose -p aqua-dev exec web python manage.py check
+docker compose -p aqua-dev down
+
+docker compose -p aqua-prod \
+  -f docker-compose.yml -f docker-compose.prod.yml ps
+~~~
+
+Use down -v apenas quando a intenção for remover banco e mídia locais. Os
+volumes produtivos são externos e não devem ser apagados sem backup aprovado.
+
+## Diagnóstico
+
+| Sintoma | Ação |
+|---|---|
+| Flood retorna 503 no dev base | Ative --profile flood |
+| Demo retorna 503 | Ative --profile demo e confira DEMO_CONTROL_TOKEN |
+| demo/predict retorna 503 | Ative flood e aguarde um segmento HLS completo |
+| Worker geral executa tarefa flood | Confirme FLOOD_CAMERA_DEDICATED_QUEUE=1 e o argumento -Q celery |
+| web não saudável | Consulte /health/; ele informa DB e Redis sem depender do modelo |

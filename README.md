@@ -6,6 +6,10 @@ Backend Django/DRF com monitoração de enchentes via câmeras, previsão do tem
 
 </div>
 
+> Consulte o [guia de operação de containers e demo](docs/OPERACAO_CONTAINERS_E_DEMO.md)
+> para comandos, variáveis, portas, saúde dos serviços e o plano de isolamento
+> opcional de Flood Monitoring.
+
 ---
 
 ## Arquitetura Dual-Instance (Dev + Prod)
@@ -21,7 +25,7 @@ O projeto suporta duas instâncias independentes rodando no mesmo computador sem
 | **Volumes** | `aqua-dev_pgdata`, `aqua-dev_media` | `aqua-prod_pgdata`, `aqua-prod_media` |
 | **Rede** | `aqua-dev_default` | `aqua-prod_default` |
 | **Banco** | `aqua_dev` | `aqua_prod` |
-| **Compose** | `docker compose up` | `docker compose -f compose.yml -f compose.prod.yml up -d` |
+| **Compose** | `docker compose up` | `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d` |
 
 Cada instância é um clone independente do repositório, com seu próprio `.env`, volumes e containers.
 
@@ -60,12 +64,26 @@ cp .env.sample.prod .env
 ```bash
 # Desenvolvimento (override carregado automaticamente)
 cd ~/apps/aqua-dev
+
+# Base: API e worker geral, sem câmeras e sem demo
 docker compose -p aqua-dev up --build
+
+# Apenas câmeras
+docker compose -p aqua-dev --profile flood up --build
+
+# Apenas demo
+docker compose -p aqua-dev --profile demo up --build
+
+# Câmeras e demo
+docker compose -p aqua-dev --profile flood --profile demo up --build
 
 # Produção (sempre rodando)
 cd ~/apps/aqua-prod
-docker compose -p aqua-prod -f compose.yml -f compose.prod.yml up -d --build
+docker compose -p aqua-prod -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
+
+Na produção, Flood Monitoring, beat e demo-stream sobem por padrão. Em
+desenvolvimento, os perfis tornam câmeras e demo opcionais.
 
 ### 4. Migrações e superusuário
 
@@ -91,9 +109,9 @@ docker compose -p aqua-dev exec web python manage.py createsuperuser
 
 | Arquivo | Função |
 |---|---|
-| `compose.yml` | Base compartilhada (build, depends_on, volumes nomeados) |
-| `compose.override.yml` | Override dev (portas interpoladas, bind mount para hot reload) — **auto-load** |
-| `compose.prod.yml` | Override prod (portas fixas, restart policies, volumes nomeados) |
+| `docker-compose.yml` | Base compartilhada (build, depends_on, volumes nomeados) |
+| `docker-compose.override.yml` | Override dev (portas interpoladas, bind mount para hot reload) — **auto-load** |
+| `docker-compose.prod.yml` | Override prod (portas fixas, restart policies, volumes nomeados) |
 
 ### Uso
 
@@ -102,7 +120,7 @@ docker compose -p aqua-dev exec web python manage.py createsuperuser
 docker compose -p aqua-dev up
 
 # Prod (override explícito)
-docker compose -p aqua-prod -f compose.yml -f compose.prod.yml up -d
+docker compose -p aqua-prod -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 
 ---
@@ -158,9 +176,9 @@ Principais variáveis:
 ## Estrutura do Projeto
 
 ```
-├── compose.yml              # Docker Compose base
-├── compose.override.yml     # Dev overrides (auto-load)
-├── compose.prod.yml         # Prod overrides
+├── docker-compose.yml              # Docker Compose base
+├── docker-compose.override.yml     # Dev overrides (auto-load)
+├── docker-compose.prod.yml         # Prod overrides
 ├── Dockerfile               # Multi-stage production (Gunicorn — usado pelo Dokku)
 ├── Dockerfile.slim          # Slim image (usada pelo Docker Compose local)
 ├── requirements.runtime.txt # Dependências para a slim image

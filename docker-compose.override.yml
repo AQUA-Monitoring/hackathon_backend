@@ -1,9 +1,12 @@
 services:
   web:
+    build:
+      target: base
     command: ["python", "manage.py", "runserver", "0.0.0.0:8001"]
-    depends_on:
-      demo-stream:
-        condition: service_healthy
+    environment:
+      FLOOD_CAMERA_API_MODE: proxy
+      FLOOD_CAMERA_DEDICATED_QUEUE: "1"
+      DEMO_ENABLED: "1"
     healthcheck:
       test:
         [
@@ -12,8 +15,8 @@ services:
           "-c",
           "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/', timeout=2)",
         ]
-      interval: 6h
-      start_interval: 5s
+      interval: 24h
+      start_interval: 20s
       timeout: 3s
       retries: 5
       start_period: 20s
@@ -21,23 +24,141 @@ services:
       - "${WEB_PORT:-8001}:8001"
     volumes:
       - .:/app
+      - media:/app/media
+
+  worker:
+    build:
+      target: base
+    command:
+      [
+        "python",
+        "-m",
+        "celery",
+        "-A",
+        "config",
+        "worker",
+        "-l",
+        "info",
+        "-Q",
+        "celery",
+      ]
+    environment:
+      FLOOD_CAMERA_API_MODE: proxy
+      FLOOD_CAMERA_DEDICATED_QUEUE: "1"
+      DEMO_ENABLED: "1"
+    volumes:
+      - .:/app
+      - media:/app/media
+
+  beat:
+    profiles: ["flood"]
+    build:
+      target: base
+    environment:
+      FLOOD_CAMERA_API_MODE: proxy
+      FLOOD_CAMERA_DEDICATED_QUEUE: "1"
+      DEMO_ENABLED: "1"
+    volumes:
+      - .:/app
+      - media:/app/media
 
   demo-stream:
-    profiles: !reset []
+    build:
+      target: demo
+    environment:
+      DEMO_SCENARIO_PATH: /demo-assets/scenario.json
+      DEMO_STREAM_MEDIA_INTERNAL_BASE_URL: http://demo-stream:8088
+    volumes:
+      - ./demo_assets:/demo-assets:ro
+    healthcheck:
+      interval: 24h
+      start_interval: 20s
+
+  flood-api:
+    profiles: ["flood"]
+    build:
+      context: .
+      dockerfile: Dockerfile.slim
+      target: flood
+    command: ["python", "manage.py", "runserver", "0.0.0.0:8091"]
+    env_file:
+      - ./.env
+    environment:
+      DJANGO_ROOT_URLCONF: config.flood_urls
+      FLOOD_CAMERA_API_MODE: direct
+      FLOOD_CAMERA_DEDICATED_QUEUE: "1"
+      DEMO_ENABLED: "1"
     depends_on:
+      redis:
+        condition: service_healthy
       db:
         condition: service_healthy
+    expose:
+      - "8091"
+    volumes:
+      - .:/app
+      - media:/app/media
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health/', timeout=2)",
+        ]
+      interval: 24h
+      start_interval: 20s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  flood-worker:
+    profiles: ["flood"]
+    build:
+      context: .
+      dockerfile: Dockerfile.slim
+      target: flood
+    command:
+      [
+        "python",
+        "-m",
+        "celery",
+        "-A",
+        "config",
+        "worker",
+        "-l",
+        "info",
+        "-Q",
+        "flood_camera",
+        "--concurrency=1",
+      ]
+    env_file:
+      - ./.env
+    environment:
+      FLOOD_CAMERA_API_MODE: direct
+      FLOOD_CAMERA_DEDICATED_QUEUE: "1"
+      DEMO_ENABLED: "1"
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - media:/app/media
+    restart: unless-stopped
 
   db:
     healthcheck:
-      interval: 6h
-      start_interval: 5s
+      interval: 24h
+      start_interval: 20s
       start_period: 20s
     ports:
       - "${DB_PORT:-5434}:5432"
 
   redis:
     healthcheck:
-      interval: 6h
-      start_interval: 5s
+      interval: 24h
+      start_interval: 20s
       start_period: 20s

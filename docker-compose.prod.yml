@@ -1,5 +1,13 @@
 services:
   web:
+    build:
+      target: full
+    command:
+      ["gunicorn", "--bind", "0.0.0.0:8090", "--timeout", "120", "config.wsgi:application"]
+    environment:
+      FLOOD_CAMERA_API_MODE: direct
+      FLOOD_CAMERA_DEDICATED_QUEUE: "0"
+      DEMO_ENABLED: "1"
     healthcheck:
       test:
         [
@@ -18,9 +26,34 @@ services:
     restart: unless-stopped
 
   worker:
+    build:
+      target: full
+    environment:
+      FLOOD_CAMERA_API_MODE: direct
+      FLOOD_CAMERA_DEDICATED_QUEUE: "0"
+      DEMO_ENABLED: "1"
     restart: unless-stopped
 
   beat:
+    profiles: !reset []
+    build:
+      target: full
+    environment:
+      FLOOD_CAMERA_API_MODE: direct
+      FLOOD_CAMERA_DEDICATED_QUEUE: "0"
+      DEMO_ENABLED: "1"
+    restart: unless-stopped
+
+  # Demo is intentionally part of the default production topology.
+  demo-stream:
+    profiles: !reset []
+    build:
+      target: demo
+    environment:
+      DEMO_SCENARIO_PATH: /demo-assets/scenario.json
+      DEMO_STREAM_MEDIA_INTERNAL_BASE_URL: http://demo-stream:8088
+    ports:
+      - "${DEMO_STREAM_PORT:-8088}:8088"
     restart: unless-stopped
 
   redis:

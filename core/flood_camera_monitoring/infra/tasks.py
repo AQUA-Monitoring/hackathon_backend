@@ -1,9 +1,6 @@
 from celery import shared_task
 import logging
 from core.common.cache import cache_set_json, now_ts
-from core.flood_camera_monitoring.application.use_cases.predict_all_cameras import (
-    PredictAllCamerasService,
-)
 
 
 @shared_task
@@ -27,6 +24,10 @@ def refresh_predict_all_cache_task() -> int:
     Stores under key 'flood:predict_all' a JSON payload {"data": [...], "ts": <unix>}.
     Returns the number of camera entries computed.
     """
+    from core.flood_camera_monitoring.application.use_cases.predict_all_cameras import (
+        PredictAllCamerasService,
+    )
+
     logger = logging.getLogger(__name__)
     service = PredictAllCamerasService()
     data = service.run()
