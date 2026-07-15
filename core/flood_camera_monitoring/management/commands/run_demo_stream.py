@@ -15,6 +15,10 @@ from core.flood_camera_monitoring.demo.server import DemoServers
 
 class Command(BaseCommand):
     help = "Run the deterministic HLS demo stream and its internal control API"
+    # The demo image intentionally excludes OpenCV and Torch. It only needs the
+    # stream controller, so avoid Django's global URL checks, which load the
+    # Flood Monitoring inference views.
+    requires_system_checks = []
 
     def add_arguments(self, parser):
         parser.add_argument(
