@@ -25,6 +25,31 @@ class EvalConfig:
     min_medium_frames: int = int(os.getenv("FLOOD_MIN_MEDIUM_FRAMES", "2"))
 
 
+def operational_state(summary: Dict[str, Any]) -> str:
+    """Return the project's operational three-level state for an evaluation.
+
+    The demo must use the same thresholds as camera evaluation: a strong
+    flooded signal wins, then the early-warning medium condition, otherwise
+    the result is normal.
+    """
+    if bool(summary.get("strong")):
+        return "flooded"
+    if bool(summary.get("medium_flag")):
+        return "medium"
+    return "normal"
+
+
+def operational_confidence(summary: Dict[str, Any], state: str) -> float:
+    """Return the confidence associated with the selected operational state."""
+    if state == "flooded":
+        value = summary.get("decision_flooded", summary.get("mean_flooded", 0.0))
+    elif state == "medium":
+        value = summary.get("mean_medium", summary.get("mean_flooded", 0.0))
+    else:
+        value = summary.get("mean_normal", 0.0)
+    return round(max(0.0, min(100.0, float(value))), 2)
+
+
 def capture_frames(stream_url: str, cfg: EvalConfig) -> list[bytes]:
     stream = OpenCVVideoStream(stream_url)
     frames: list[bytes] = []

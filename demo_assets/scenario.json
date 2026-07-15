@@ -1,0 +1,12 @@
+{
+  "scenario_id": "flood-demo-v1",
+  "segment_seconds": 2,
+  "phases": [
+    {
+      "name": "via alagada",
+      "file": "source.mp4",
+      "label": "flooded",
+      "duration_seconds": 600
+    }
+  ]
+}

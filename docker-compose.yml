@@ -30,7 +30,10 @@ services:
       - media:/app/media
     restart: unless-stopped
 
+  # The flood schedule is explicit in development and always enabled by the
+  # production override, preserving the current production behavior.
   beat:
+    profiles: ["flood"]
     build:
       context: .
       dockerfile: Dockerfile.slim
@@ -51,6 +54,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.slim
+      target: demo
     command:
       [
         "python",
@@ -64,8 +68,6 @@ services:
     environment:
       DEMO_SCENARIO_PATH: /demo-assets/scenario.json
       DEMO_STREAM_MEDIA_INTERNAL_BASE_URL: http://demo-stream:8088
-    volumes:
-      - ./demo_assets:/demo-assets:ro
     ports:
       - "${DEMO_STREAM_PORT:-8088}:8088"
     expose:

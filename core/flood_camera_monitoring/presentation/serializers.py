@@ -22,3 +22,9 @@ class PredictAllCamerasResponseSerializer(serializers.Serializer):
     confidence = serializers.FloatField()
     probabilities = serializers.DictField()
     meta = serializers.DictField(required=False)
+
+
+class DemoStateSerializer(serializers.Serializer):
+    """Validate the only mutable field exposed by the demo control API."""
+
+    state = serializers.ChoiceField(choices=("auto", "normal", "flooded"))
