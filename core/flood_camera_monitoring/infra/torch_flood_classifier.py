@@ -90,3 +90,8 @@ def build_default_classifier(
             logging.getLogger(__name__).error("Failed to download checkpoint: %s", e)
 
     return TorchFloodClassifier(str(checkpoint_path), device=device)
+
+
+# Public compatibility name used by the demo evaluator.  Keep one factory so
+# demo and real-camera paths resolve the exact same checkpoint and classifier.
+get_default_classifier = build_default_classifier

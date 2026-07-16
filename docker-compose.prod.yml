@@ -1,19 +1,73 @@
 services:
   web:
+    build:
+      target: full
+    command:
+      ["gunicorn", "--bind", "0.0.0.0:8090", "--timeout", "120", "config.wsgi:application"]
+    environment:
+      FLOOD_CAMERA_API_MODE: direct
+      FLOOD_CAMERA_DEDICATED_QUEUE: "0"
+      DEMO_ENABLED: "1"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health/', timeout=2)",
+        ]
+      interval: 30s
+      start_interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
     ports:
       - "8000:8090"
     restart: unless-stopped
 
   worker:
+    build:
+      target: full
+    environment:
+      FLOOD_CAMERA_API_MODE: direct
+      FLOOD_CAMERA_DEDICATED_QUEUE: "0"
+      DEMO_ENABLED: "1"
     restart: unless-stopped
 
   beat:
+    profiles: !reset []
+    build:
+      target: full
+    environment:
+      FLOOD_CAMERA_API_MODE: direct
+      FLOOD_CAMERA_DEDICATED_QUEUE: "0"
+      DEMO_ENABLED: "1"
+    restart: unless-stopped
+
+  # Demo is intentionally part of the default production topology.
+  demo-stream:
+    profiles: !reset []
+    build:
+      target: demo
+    environment:
+      DEMO_SCENARIO_PATH: /demo-assets/scenario.json
+      DEMO_STREAM_MEDIA_INTERNAL_BASE_URL: http://demo-stream:8088
+    ports:
+      - "${DEMO_STREAM_PORT:-8088}:8088"
     restart: unless-stopped
 
   redis:
+    healthcheck:
+      interval: 30s
+      start_interval: 5s
+      start_period: 20s
     restart: unless-stopped
 
   db:
+    healthcheck:
+      interval: 30s
+      start_interval: 5s
+      start_period: 20s
     ports:
       - "5433:5432"
     restart: unless-stopped

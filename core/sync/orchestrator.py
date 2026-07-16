@@ -9,6 +9,7 @@ from core.sync.syncers import (
     sync_cameras,
     sync_flood_points,
     sync_forecasts,
+    sync_images,
     sync_occurrences,
     sync_posts,
     sync_users,
@@ -19,6 +20,14 @@ logger = logging.getLogger(__name__)
 
 
 def _register_entities():
+    registry.register(
+        key="images",
+        endpoint="/api/upload/images/",
+        model=None,
+        sync_func=sync_images,
+        dependencies=[],
+        description="Imagens e arquivos de mídia",
+    )
     registry.register(
         key="addressing",
         endpoint="/api/addressing/regions-neighborhoods/",
@@ -32,7 +41,7 @@ def _register_entities():
         endpoint="/api/users/",
         model=None,
         sync_func=sync_users,
-        dependencies=[],
+        dependencies=["images"],
         description="Usuários do sistema",
     )
     registry.register(
@@ -56,7 +65,7 @@ def _register_entities():
         endpoint="/api/blog/",
         model=None,
         sync_func=sync_posts,
-        dependencies=[],
+        dependencies=["images"],
         description="Posts do blog",
     )
     registry.register(
@@ -86,6 +95,7 @@ def _register_entities():
 
 
 def list_entities() -> str:
+    _register_entities()
     lines = []
     lines.append(f"{'Chave':<20} {'Dependências':<30} {'Descrição':<40}")
     lines.append("-" * 90)

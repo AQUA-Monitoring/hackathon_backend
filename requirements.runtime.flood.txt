@@ -1,0 +1,5 @@
+# Installed with the official PyTorch CPU index by Dockerfile.slim.
+opencv-python-headless>=4.8.0.76
+gdown>=5.2.0,<6.0.0
+torch==2.8.0
+torchvision==0.23.0

@@ -5,11 +5,11 @@ from pathlib import Path
 from django.db import models
 
 
-def image_file_path(image, _) -> str:
+def image_file_path(image, filename: str) -> str:
     content_type = getattr(image.file, "content_type", None)
     extension: str | None = mimetypes.guess_extension(content_type or "")
-    if not extension and getattr(image.file, "name", None):
-        extension = Path(image.file.name).suffix
+    if not extension:
+        extension = Path(filename or getattr(image.file, "name", "")).suffix
     if extension == ".jpe":
         extension = ".jpg"
     return f"images/{image.public_id}{extension or ''}"

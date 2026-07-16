@@ -27,11 +27,13 @@ from rest_framework_simplejwt.views import (
 from core.users.presentation.auth_views import EmailTokenObtainPairView
 from core.uploader.router import router as uploader_router
 from core.sync.export import ExportView
+from config.core_health import health
 
 router = DefaultRouter()
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("health/", health, name="service-health"),
     # JWT auth endpoints
     # Single auth token route using email/password
     path(
@@ -42,10 +44,6 @@ urlpatterns = [
     path("api/weather/", include("core.weather.presentation.urls")),
     path("api/forecast/", include("core.forecast.presentation.urls")),
     path("api/occurrences/", include("core.occurrences.presentation.urls")),
-    path(
-        "api/flood_monitoring/",
-        include("core.flood_camera_monitoring.presentation.urls"),
-    ),
     path("api/upload/", include(uploader_router.urls)),
     path("api/addressing/", include("core.addressing.presentation.urls")),
     path("api/donate/", include("core.donate.presentation.urls")),
@@ -55,6 +53,27 @@ urlpatterns = [
     path("api/blog/", include("core.blog.presentation.urls")),
     path("api/export/", ExportView.as_view(), name="export-data"),
 ]
+
+if settings.FLOOD_CAMERA_API_MODE == "proxy":
+    urlpatterns.append(
+        path(
+            "api/flood_monitoring/",
+            include("core.flood_camera_monitoring.presentation.base_urls"),
+        )
+    )
+    urlpatterns.append(
+        path(
+            "api/flood_monitoring/",
+            include("core.flood_camera_monitoring.presentation.proxy_urls"),
+        )
+    )
+else:
+    urlpatterns.append(
+        path(
+            "api/flood_monitoring/",
+            include("core.flood_camera_monitoring.presentation.flood_urls"),
+        )
+    )
 
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

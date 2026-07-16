@@ -1,4 +1,6 @@
 import time
+from urllib.parse import urljoin, urlsplit
+
 import requests
 from requests.exceptions import RequestException
 
@@ -38,3 +40,43 @@ def fetch_all(endpoint: str, token: str, page_size: int = 100) -> list[dict]:
             time.sleep(0.2)
 
     return results
+
+
+def fetch_file(url: str, token: str, max_bytes: int = 10 * 1024 * 1024) -> bytes:
+    """Download a media file from the configured remote API.
+
+    Media URLs returned by Django are normally relative.  Resolving them against
+    ``API_URL`` also prevents a payload from making the sync process fetch an
+    arbitrary host.
+    """
+    base_url, _, _ = get_api_config()
+    base_url = f"{base_url.rstrip('/')}/"
+    resolved_url = urljoin(base_url, url)
+
+    base = urlsplit(base_url)
+    target = urlsplit(resolved_url)
+    if target.scheme not in {"http", "https"} or target.netloc != base.netloc:
+        raise ValueError("A URL da imagem não pertence à API remota configurada")
+
+    try:
+        with requests.get(
+            resolved_url,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=60,
+            stream=True,
+        ) as response:
+            response.raise_for_status()
+            content_length = response.headers.get("Content-Length")
+            if content_length and int(content_length) > max_bytes:
+                raise ValueError(f"Imagem excede o limite de {max_bytes} bytes")
+
+            content = bytearray()
+            for chunk in response.iter_content(chunk_size=64 * 1024):
+                if not chunk:
+                    continue
+                content.extend(chunk)
+                if len(content) > max_bytes:
+                    raise ValueError(f"Imagem excede o limite de {max_bytes} bytes")
+            return bytes(content)
+    except RequestException as exc:
+        raise RuntimeError(f"Erro ao baixar imagem de {resolved_url}: {exc}") from exc

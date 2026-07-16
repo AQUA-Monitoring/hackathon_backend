@@ -98,7 +98,28 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-ROOT_URLCONF = "config.urls"
+ROOT_URLCONF = os.getenv("DJANGO_ROOT_URLCONF", "config.urls")
+
+# The development gateway remains lightweight and proxies only flood-specific
+# routes to the optional flood service. Production uses direct views.
+FLOOD_CAMERA_API_MODE = os.getenv("FLOOD_CAMERA_API_MODE", "direct").strip().lower()
+if FLOOD_CAMERA_API_MODE not in {"direct", "proxy"}:
+    raise ImproperlyConfigured(
+        "FLOOD_CAMERA_API_MODE must be either 'direct' or 'proxy'"
+    )
+
+FLOOD_CAMERA_SERVICE_URL = os.getenv(
+    "FLOOD_CAMERA_SERVICE_URL", "http://flood-api:8091"
+).rstrip("/")
+FLOOD_CAMERA_PROXY_CONNECT_TIMEOUT_SECONDS = float(
+    os.getenv("FLOOD_CAMERA_PROXY_CONNECT_TIMEOUT_SECONDS", "2")
+)
+FLOOD_CAMERA_PROXY_READ_TIMEOUT_SECONDS = float(
+    os.getenv("FLOOD_CAMERA_PROXY_READ_TIMEOUT_SECONDS", "120")
+)
+FLOOD_CAMERA_DEDICATED_QUEUE = (
+    os.getenv("FLOOD_CAMERA_DEDICATED_QUEUE", "0") == "1"
+)
 
 TEMPLATES = [
     {
@@ -184,6 +205,27 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+# Optional deterministic demo stream. The default keeps demo endpoints
+# disabled until the Compose `demo` profile is explicitly enabled.
+DEMO_ENABLED = os.getenv("DEMO_ENABLED", "0") == "1"
+DEMO_CONTROL_TOKEN = os.getenv("DEMO_CONTROL_TOKEN", "")
+DEMO_SCENARIO_PATH = os.getenv(
+    "DEMO_SCENARIO_PATH", "/demo-assets/scenario.json"
+)
+DEMO_WORK_DIR = os.getenv("DEMO_WORK_DIR", "/tmp/aqua-demo-stream")
+DEMO_PREDICTION_CACHE_SECONDS = int(
+    os.getenv("DEMO_PREDICTION_CACHE_SECONDS", "30")
+)
+DEMO_STREAM_INTERNAL_URL = os.getenv(
+    "DEMO_STREAM_INTERNAL_URL", "http://demo-stream:8089"
+).rstrip("/")
+DEMO_STREAM_MEDIA_INTERNAL_BASE_URL = os.getenv(
+    "DEMO_STREAM_MEDIA_INTERNAL_BASE_URL", "http://demo-stream:8088"
+).rstrip("/")
+DEMO_STREAM_PUBLIC_URL = os.getenv(
+    "DEMO_STREAM_PUBLIC_URL", "http://localhost:8088/hls/playlist.m3u8"
+)
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
@@ -203,6 +245,13 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": 300.00,
     },
 }
+
+# Only development services that explicitly opt into Flood Monitoring route
+# its work to the dedicated worker. Production retains the established queue.
+if FLOOD_CAMERA_DEDICATED_QUEUE:
+    CELERY_TASK_ROUTES = {
+        "core.flood_camera_monitoring.*": {"queue": "flood_camera"},
+    }
 
 # Logging: ensure our modules and Celery log to console at INFO level
 LOGGING = {

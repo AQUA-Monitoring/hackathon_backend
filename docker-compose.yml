@@ -2,7 +2,7 @@ services:
   web:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.slim
     env_file:
       - ./.env
     depends_on:
@@ -12,14 +12,12 @@ services:
         condition: service_healthy
     volumes:
       - media:/app/media
-    ports:
-      - "8090:8090"
     restart: unless-stopped
 
   worker:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.slim
     command: ["python", "-m", "celery", "-A", "config", "worker", "-l", "info"]
     env_file:
       - ./.env
@@ -32,10 +30,13 @@ services:
       - media:/app/media
     restart: unless-stopped
 
+  # The flood schedule is explicit in development and always enabled by the
+  # production override, preserving the current production behavior.
   beat:
+    profiles: ["flood"]
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.slim
     command: ["python", "-m", "celery", "-A", "config", "beat", "-l", "info"]
     env_file:
       - ./.env
@@ -46,6 +47,44 @@ services:
         condition: service_healthy
     volumes:
       - media:/app/media
+    restart: unless-stopped
+
+  demo-stream:
+    profiles: ["demo"]
+    build:
+      context: .
+      dockerfile: Dockerfile.slim
+      target: demo
+    command:
+      [
+        "python",
+        "manage.py",
+        "run_demo_stream",
+        "--scenario",
+        "/demo-assets/scenario.json",
+      ]
+    env_file:
+      - ./.env
+    environment:
+      DEMO_SCENARIO_PATH: /demo-assets/scenario.json
+      DEMO_STREAM_MEDIA_INTERNAL_BASE_URL: http://demo-stream:8088
+    ports:
+      - "${DEMO_STREAM_PORT:-8088}:8088"
+    expose:
+      - "8089"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8089/health', timeout=2)",
+        ]
+      interval: 6h
+      start_interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 60s
     restart: unless-stopped
 
   redis:
@@ -71,8 +110,4 @@ services:
 
 volumes:
   pgdata:
-    external: true
-    name: docker_pgdata
   media:
-    external: true
-    name: docker_media

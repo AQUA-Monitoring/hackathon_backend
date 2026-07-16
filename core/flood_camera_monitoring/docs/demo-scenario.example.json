@@ -1,0 +1,18 @@
+{
+  "scenario_id": "flood-demo-v1",
+  "segment_seconds": 2,
+  "phases": [
+    {
+      "name": "trânsito normal",
+      "file": "normal.mp4",
+      "label": "normal",
+      "duration_seconds": 30
+    },
+    {
+      "name": "via alagada",
+      "file": "flooded.mp4",
+      "label": "flooded",
+      "duration_seconds": 30
+    }
+  ]
+}
