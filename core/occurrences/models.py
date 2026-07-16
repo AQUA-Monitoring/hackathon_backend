@@ -3,11 +3,12 @@ import os, geopandas as gpd
 from core.addressing.infra.models import Neighborhood
 
 class Occurrence(models.Model):
-    date = models.DateField()
+    date = models.DateTimeField()
+
     class Situation(models.IntegerChoices):
         ALERTA = 1, "Alerta"
         ATENCAO = 2, "Atenção"
-        MOBILIZACAO = 3, "Mobilização"
+        EMERGENCIA = 3, "Emergência"
         NORMALIDADE = 4, "Normalidade"
     situation = models.IntegerField(choices=Situation.choices, default=Situation.NORMALIDADE)
 
@@ -18,7 +19,7 @@ class Occurrence(models.Model):
         INUNDACAO = 4, "Inundação"
     type = models.IntegerField(choices=Type.choices, default=Type.ALAGAMENTO)
 
-    neighborhood = models.ForeignKey(Neighborhood, on_delete=models.PROTECT, related_name="occorrences")
+    neighborhood = models.ManyToManyField(Neighborhood, related_name="occorrences")
 
     def __str__(self):
         return f'{self.situation} - {self.date} - {self.neighborhood}'
