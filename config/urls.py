@@ -52,6 +52,8 @@ urlpatterns = [
     ),
     path("api/blog/", include("core.blog.presentation.urls")),
     path("api/export/", ExportView.as_view(), name="export-data"),
+    path('accounts/', include('allauth.urls')),
+
 ]
 
 if settings.FLOOD_CAMERA_API_MODE == "proxy":

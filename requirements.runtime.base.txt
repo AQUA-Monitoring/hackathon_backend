@@ -22,3 +22,4 @@ rtree>=1.2.0
 psycopg[binary]>=3.2.1
 mercadopago==2.3.0
 python-magic==0.4.27
+django-allauth[socialaccount]>=65.0.0
