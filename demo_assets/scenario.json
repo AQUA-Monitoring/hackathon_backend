@@ -4,7 +4,7 @@
   "phases": [
     {
       "name": "via alagada",
-      "file": "source.mp4",
+      "video_attachment_key_env": "DEMO_VIDEO_ATTACHMENT_KEY",
       "label": "flooded",
       "duration_seconds": 600
     }

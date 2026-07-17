@@ -65,6 +65,9 @@ services:
       ]
     env_file:
       - ./.env
+    depends_on:
+      db:
+        condition: service_healthy
     environment:
       DEMO_SCENARIO_PATH: /demo-assets/scenario.json
       DEMO_STREAM_MEDIA_INTERNAL_BASE_URL: http://demo-stream:8088
@@ -72,6 +75,8 @@ services:
       - "${DEMO_STREAM_PORT:-8088}:8088"
     expose:
       - "8089"
+    volumes:
+      - media:/app/media
     healthcheck:
       test:
         [

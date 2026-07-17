@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 ALLOWED_LABELS = {"normal", "medium", "flooded"}
 ALLOWED_STATES = {"auto", "normal", "flooded"}
+ENVIRONMENT_VARIABLE_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+VideoResolver = Callable[[str], Path]
 
 
 class DemoManifestError(ValueError):
@@ -78,7 +82,57 @@ def _safe_asset_path(asset_root: Path, raw_path: Any) -> Path:
     return candidate
 
 
-def load_scenario(path: str | Path) -> DemoScenario:
+def _resolve_phase_video(
+    manifest_path: Path,
+    phase: dict[str, Any],
+    video_resolver: VideoResolver | None,
+) -> Path:
+    file_value = phase.get("file")
+    attachment_key = phase.get("video_attachment_key")
+    attachment_key_env = phase.get("video_attachment_key_env")
+    configured_sources = sum(
+        value is not None
+        for value in (file_value, attachment_key, attachment_key_env)
+    )
+    if configured_sources != 1:
+        raise DemoManifestError(
+            "Every phase must define exactly one of 'file', "
+            "'video_attachment_key', or 'video_attachment_key_env'"
+        )
+
+    if file_value is not None:
+        return _safe_asset_path(manifest_path.parent, file_value)
+
+    if video_resolver is None:
+        raise DemoManifestError(
+            "Uploader video sources require a configured video resolver"
+        )
+
+    if attachment_key_env is not None:
+        valid_environment_name = (
+            isinstance(attachment_key_env, str)
+            and ENVIRONMENT_VARIABLE_RE.fullmatch(attachment_key_env)
+        )
+        if not valid_environment_name:
+            raise DemoManifestError(
+                "'video_attachment_key_env' must be a valid environment variable name"
+            )
+        attachment_key = os.getenv(attachment_key_env)
+        if not attachment_key:
+            raise DemoManifestError(
+                f"Environment variable {attachment_key_env} is not configured"
+            )
+
+    if not isinstance(attachment_key, str) or not attachment_key.strip():
+        raise DemoManifestError("Video attachment key must be a non-empty string")
+    return video_resolver(attachment_key.strip())
+
+
+def load_scenario(
+    path: str | Path,
+    *,
+    video_resolver: VideoResolver | None = None,
+) -> DemoScenario:
     manifest_path = Path(path)
     if not manifest_path.is_file():
         raise DemoManifestError(f"Scenario manifest not found: {manifest_path}")
@@ -127,7 +181,9 @@ def load_scenario(path: str | Path) -> DemoScenario:
         phases.append(
             DemoPhase(
                 name=name.strip(),
-                file_path=_safe_asset_path(manifest_path.parent, phase.get("file")),
+                file_path=_resolve_phase_video(
+                    manifest_path, phase, video_resolver
+                ),
                 label=str(label),
                 duration_seconds=duration,
             )

@@ -69,7 +69,7 @@ services:
       DEMO_SCENARIO_PATH: /demo-assets/scenario.json
       DEMO_STREAM_MEDIA_INTERNAL_BASE_URL: http://demo-stream:8088
     volumes:
-      - ./demo_assets:/demo-assets:ro
+      - ./demo_assets/scenario.json:/demo-assets/scenario.json:ro
     healthcheck:
       interval: 24h
       start_interval: 20s

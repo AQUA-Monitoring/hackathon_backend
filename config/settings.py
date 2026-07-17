@@ -205,6 +205,13 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+UPLOADER_IMAGE_MAX_BYTES = int(
+    os.getenv("UPLOADER_IMAGE_MAX_BYTES", str(10 * 1024 * 1024))
+)
+UPLOADER_VIDEO_MAX_BYTES = int(
+    os.getenv("UPLOADER_VIDEO_MAX_BYTES", str(500 * 1024 * 1024))
+)
+
 # Optional deterministic demo stream. The default keeps demo endpoints
 # disabled until the Compose `demo` profile is explicitly enabled.
 DEMO_ENABLED = os.getenv("DEMO_ENABLED", "0") == "1"

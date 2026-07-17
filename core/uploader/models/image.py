@@ -4,10 +4,16 @@ from pathlib import Path
 
 from django.db import models
 
+from core.uploader.helpers.files import SVG_XML_CONTENT_TYPES, get_content_type
+
 
 def image_file_path(image, filename: str) -> str:
-    content_type = getattr(image.file, "content_type", None)
-    extension: str | None = mimetypes.guess_extension(content_type or "")
+    content_type = get_content_type(image.file)
+    extension: str | None
+    if content_type in SVG_XML_CONTENT_TYPES:
+        extension = ".svg"
+    else:
+        extension = mimetypes.guess_extension(content_type or "")
     if not extension:
         extension = Path(filename or getattr(image.file, "name", "")).suffix
     if extension == ".jpe":
@@ -31,7 +37,9 @@ class Image(models.Model):
             "Should not be readable until the image is attached to another object."
         ),
     )
-    file = models.ImageField(upload_to=image_file_path)
+    # FileField is intentional: Pillow-backed ImageField rejects valid SVGs.
+    # The upload serializer performs content-aware validation for raster and SVG.
+    file = models.FileField(upload_to=image_file_path)
     description = models.CharField(max_length=255, blank=True)
     uploaded_on = models.DateTimeField(auto_now_add=True)
 

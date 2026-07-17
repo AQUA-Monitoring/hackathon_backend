@@ -273,4 +273,8 @@ pyrightconfig.json
 /core/flood_camera_monitoring/infra/machine_model
 core/flood_camera_monitoring/infra/machine_model/best_real_model.pth
 
+# Configurações locais de IA
+AGENTS.md
+.codex/
+
 # End of https://www.toptal.com/developers/gitignore/api/python,djang

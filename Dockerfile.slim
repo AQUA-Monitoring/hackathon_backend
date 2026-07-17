@@ -42,7 +42,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && \
 COPY manage.py ./
 COPY config ./config
 COPY core ./core
-COPY demo_assets /demo-assets
+COPY demo_assets/scenario.json /demo-assets/scenario.json
 
 ENV DJANGO_SETTINGS_MODULE=config.settings
 

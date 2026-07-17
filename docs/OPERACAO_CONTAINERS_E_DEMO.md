@@ -69,6 +69,7 @@ Variáveis principais:
 | FLOOD_CAMERA_SERVICE_URL | Endereço interno do flood-api, padrão http://flood-api:8091 |
 | FLOOD_CAMERA_DEDICATED_QUEUE | 1 no dev para usar a fila flood_camera; 0 em produção |
 | DEMO_CONTROL_TOKEN | Obrigatório para iniciar e controlar demo-stream |
+| DEMO_VIDEO_ATTACHMENT_KEY | Chave retornada por POST /api/upload/videos/ para o vídeo da demo |
 | DEMO_STREAM_PUBLIC_URL | URL HLS consumida pelo navegador |
 | DEMO_STREAM_INTERNAL_URL | Controle interno da demo, http://demo-stream:8089 |
 | DEMO_STREAM_MEDIA_INTERNAL_BASE_URL | Segmentos internos, http://demo-stream:8088 |
@@ -77,13 +78,34 @@ Em produção, DEMO_ENABLED é forçado para 1 pela composição e demo-stream s
 como serviço normal. Defina um DEMO_CONTROL_TOKEN forte e uma URL pública real
 em .env.sample.prod antes de publicar.
 
-## Demo
+## Uploader e demo
 
-demo-stream usa FFmpeg e lê assets de /demo-assets. Em desenvolvimento,
-demo_assets é montado somente para leitura; na produção, os assets são
-incorporados na imagem demo. O cenário deve existir em
-demo_assets/scenario.json e cada vídeo referenciado precisa estar na mesma
-pasta.
+O uploader aceita PNG, JPEG e SVG seguro em /api/upload/images/, PDF em
+/api/upload/documents/ e MP4, WebM ou MOV em /api/upload/videos/. Os limites
+padrão são 10 MiB para imagens e 500 MiB para vídeos; podem ser alterados com
+UPLOADER_IMAGE_MAX_BYTES e UPLOADER_VIDEO_MAX_BYTES.
+
+O arquivo demo_assets/scenario.json mantém apenas a estrutura do cenário. O
+MP4 não faz parte da imagem Docker nem do repositório: demo-stream resolve
+DEMO_VIDEO_ATTACHMENT_KEY no banco e materializa o arquivo a partir do storage
+do Django. O volume media é compartilhado entre web e demo-stream, e o mesmo
+fluxo também funciona com outro backend de storage.
+
+Antes da primeira execução em cada ambiente, envie o vídeo e copie o
+attachment_key da resposta para o arquivo .env:
+
+~~~bash
+curl -f -X POST http://localhost:8001/api/upload/videos/ \
+  -F 'description=Demo de alagamento' \
+  -F 'file=@/caminho/para/demo.mp4'
+
+# .env
+DEMO_VIDEO_ATTACHMENT_KEY=<attachment_key_da_resposta>
+~~~
+
+Depois de alterar a chave, recrie demo-stream para que ele carregue o vídeo do
+uploader. O banco e o volume media precisam ser preservados juntos entre
+deploys.
 
 ~~~bash
 # Stream e API base de controle

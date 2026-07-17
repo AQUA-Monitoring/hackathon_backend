@@ -14,6 +14,7 @@ EXPORT_MODELS = [
     "addressing.Address",
     "uploader.Image",
     "uploader.Document",
+    "uploader.Video",
     "users.User",
     "flood_camera_monitoring.Camera",
     "flood_camera_monitoring.FloodDetectionRecord",
