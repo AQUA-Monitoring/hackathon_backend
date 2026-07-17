@@ -1,7 +1,7 @@
 from django.db import models
 
 class Weather(models.Model):
-    date = models.DateField()
+    date = models.DateTimeField()
     latitude = models.FloatField()
     longitude = models.FloatField()
     neighborhood = models.CharField(max_length=20)
