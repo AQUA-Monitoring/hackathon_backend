@@ -24,7 +24,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import (
     TokenRefreshView,
 )
-from core.users.presentation.auth_views import EmailTokenObtainPairView
+from core.users.presentation.auth_views import EmailTokenObtainPairView, SyncTokenView
 from core.uploader.router import router as uploader_router
 from core.sync.export import ExportView
 from config.core_health import health
@@ -40,6 +40,7 @@ urlpatterns = [
         "api/auth/token/", EmailTokenObtainPairView.as_view(), name="token_obtain_pair"
     ),
     path("api/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    path("api/sync/token/", SyncTokenView.as_view(), name="sync-token"),
     path("api/users/", include("core.users.presentation.urls")),
     path("api/weather/", include("core.weather.presentation.urls")),
     path("api/forecast/", include("core.forecast.presentation.urls")),

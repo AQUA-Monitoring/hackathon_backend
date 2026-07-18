@@ -1,43 +1,45 @@
-import shutil
-import tempfile
-from unittest.mock import patch
+import os
+from unittest.mock import Mock, patch
 
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase
 
-from core.sync.syncers import sync_images
-from core.uploader.models import Image
+from core.sync.auth import login
 
 
-class SyncImagesTests(TestCase):
-    def setUp(self):
-        self.media_root = tempfile.mkdtemp()
-        self.settings_override = override_settings(MEDIA_ROOT=self.media_root)
-        self.settings_override.enable()
+class SyncAuthClientTests(SimpleTestCase):
+    @patch("core.sync.auth.requests.post")
+    def test_login_uses_dedicated_sync_token_route(self, post):
+        response = Mock(status_code=200)
+        response.json.return_value = {"access": "sync-access-token"}
+        post.return_value = response
 
-    def tearDown(self):
-        self.settings_override.disable()
-        shutil.rmtree(self.media_root, ignore_errors=True)
-
-    @patch("core.sync.syncers.fetch_file", return_value=b"image-content")
-    def test_imports_image_and_uses_attachment_key_as_identity(self, fetch_file):
-        data = [
+        with patch.dict(
+            os.environ,
             {
-                "attachment_key": "73f1a3d0-0f15-4c4d-ae2f-703e665808f7",
-                "url": "/media/images/remote-image.png",
-                "description": "Imagem remota",
-            }
-        ]
+                "API_URL": "https://api.example.test/",
+                "API_EMAIL": "sync@example.test",
+                "API_PASSWORD": "secret",
+            },
+        ):
+            self.assertEqual(login(), "sync-access-token")
 
-        created, updated = sync_images(data, "token")
+        post.assert_called_once_with(
+            "https://api.example.test/api/sync/token/",
+            json={"email": "sync@example.test", "password": "secret"},
+            timeout=30,
+        )
 
-        self.assertEqual((created, updated), (1, 0))
-        image = Image.objects.get()
-        self.assertEqual(str(image.attachment_key), data[0]["attachment_key"])
-        self.assertEqual(image.description, "Imagem remota")
-        self.assertTrue(image.file.name.endswith(".png"))
-        fetch_file.assert_called_once_with(data[0]["url"], "token")
-
-        created, updated = sync_images(data, "token")
-
-        self.assertEqual((created, updated), (0, 0))
-        fetch_file.assert_called_once()
+    @patch("core.sync.auth.requests.post")
+    def test_authentication_error_does_not_repeat_remote_body(self, post):
+        post.return_value = Mock(status_code=401, text="sensitive remote body")
+        with patch.dict(
+            os.environ,
+            {
+                "API_URL": "https://api.example.test",
+                "API_EMAIL": "x@y.test",
+                "API_PASSWORD": "secret",
+            },
+        ):
+            with self.assertRaisesRegex(RuntimeError, "credenciais inválidas") as error:
+                login()
+        self.assertNotIn("sensitive remote body", str(error.exception))
