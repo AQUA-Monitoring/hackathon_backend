@@ -59,6 +59,10 @@ class FloodSpatialEventRevision(TimestampedModel):
     geometry_method = models.CharField(max_length=16, choices=GeometryMethod.choices)
     source_version = models.CharField(max_length=120, blank=True)
     properties = models.JSONField(default=dict, blank=True)
+    # Snapshot territorial da revisão. Não é uma confirmação de ocorrência: só
+    # registra a cobertura disponível na base territorial no momento da revisão.
+    affected_regions = models.JSONField(default=list, blank=True)
+    affected_streets = models.JSONField(default=list, blank=True)
     author = models.ForeignKey("users.User", null=True, blank=True, on_delete=models.PROTECT, related_name="flood_event_revisions")
     justification = models.TextField()
     source_revision = models.CharField(max_length=255)

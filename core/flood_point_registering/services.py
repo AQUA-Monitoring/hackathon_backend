@@ -5,6 +5,7 @@ from django.db import transaction
 
 from core.flood_point_registering.infra.models import Flood_Point_Register
 from core.flood_impact.models import FloodSpatialEvent, FloodSpatialEventRevision
+from core.flood_impact.services import affected_territory_snapshot
 
 
 def active_flood_points(*, at=None):
@@ -26,6 +27,11 @@ def sync_legacy_spatial_event(flood_point, *, author=None):
         event.city = flood_point.city
     event.evidence_kind = FloodSpatialEvent.EvidenceKind.LEGACY_UNCLASSIFIED
     revision_number = (event.revisions.order_by("-revision").values_list("revision", flat=True).first() or 0) + 1
+    affected_territory = affected_territory_snapshot(
+        city=flood_point.city,
+        location=flood_point.location,
+        footprint=flood_point.footprint,
+    )
     revision = FloodSpatialEventRevision.objects.create(
         event=event,
         revision=revision_number,
@@ -41,6 +47,8 @@ def sync_legacy_spatial_event(flood_point, *, author=None):
             else FloodSpatialEventRevision.GeometryMethod.DERIVED
         ),
         source_version="legacy-adapter-v1",
+        affected_regions=affected_territory["affected_regions"],
+        affected_streets=affected_territory["affected_streets"],
         properties={
             "legacy_props": flood_point.props,
             "territory_resolution": flood_point.territory_resolution,

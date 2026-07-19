@@ -1,8 +1,9 @@
 from django.test import TestCase
 
-from django.contrib.gis.geos import MultiPolygon, Polygon
+from django.contrib.gis.geos import LineString, MultiLineString, MultiPolygon, Polygon
+from django.utils import timezone
 
-from core.addressing.models import City, Neighborhood
+from core.addressing.models import City, GeodataDataset, Neighborhood, Region, Street
 
 from core.flood_point_registering.presentation.serializers.RegisterSerializer import (
     FloodPointRegisterSerializer,
@@ -38,6 +39,20 @@ class FloodPointSpatialFallbackTests(TestCase):
             name="Bairro espacial", city=city.name, city_ref=city,
             geometry=city_geometry,
         )
+        region = Region.objects.create(
+            name="Região espacial", city=city.name, city_ref=city,
+            geometry=city_geometry,
+        )
+        dataset = GeodataDataset.objects.create(
+            city=city, kind="street", authority="Teste", title="Ruas", source_url="https://example.test/ruas",
+            license_name="Teste", source_version="1", retrieved_at=timezone.now(), sha256="b" * 64,
+            source_crs="EPSG:4326", status="active",
+        )
+        street = Street.objects.create(
+            city=city, dataset=dataset, source_record_id="street-1", name="Rua espacial",
+            normalized_name="rua espacial",
+            geometry=MultiLineString(LineString((-48.82, -26.30), (-48.78, -26.30)), srid=4326),
+        )
         footprint = {
             "type": "MultiPolygon",
             "coordinates": [[[[-48.82, -26.32], [-48.78, -26.32],
@@ -60,3 +75,21 @@ class FloodPointSpatialFallbackTests(TestCase):
         self.assertIsNotNone(instance.spatial_event_id)
         self.assertEqual(instance.spatial_event.evidence_kind, "LEGACY_UNCLASSIFIED")
         self.assertEqual(instance.spatial_event.current_revision.footprint, instance.footprint)
+        revision = instance.spatial_event.current_revision
+        self.assertEqual(revision.affected_regions, [{"id": str(region.id), "name": region.name}])
+        self.assertEqual(revision.affected_streets, [{"id": str(street.id), "name": street.name}])
+        response = FloodPointRegisterSerializer(instance).data
+        self.assertEqual(response["affected_regions"], revision.affected_regions)
+        self.assertEqual(response["affected_streets"], revision.affected_streets)
+
+    def test_neighborhood_name_is_resolved_with_accents_and_spacing_normalized(self):
+        city = City.objects.create(name="Cidade normalizada")
+        neighborhood = Neighborhood.objects.create(
+            name="São José", normalized_name="sao jose", city=city.name, city_ref=city,
+        )
+        serializer = FloodPointRegisterSerializer(data={
+            "city": city.name.upper(), "neighborhood": "  SAO   JOSE ", "possibility": 0.2,
+            "finished_at": "2099-07-20T00:00:00Z",
+        })
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data["neighborhood"], neighborhood)

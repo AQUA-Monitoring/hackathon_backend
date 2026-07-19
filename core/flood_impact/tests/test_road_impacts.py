@@ -1,10 +1,14 @@
 from django.contrib.gis.geos import LineString, MultiLineString, MultiPolygon, Point, Polygon
+from django.apps import apps as django_apps
 from django.test import TestCase
 from django.utils import timezone
+from importlib import import_module
+from rest_framework.test import APIClient
 
 from core.addressing.models import City, GeodataDataset, RoadAxisSegment, Street
-from core.flood_impact.models import FloodSpatialEvent, FloodSpatialEventRevision, RoadFloodImpact
+from core.flood_impact.models import FloodSpatialEvent, FloodSpatialEventRevision, RoadFloodImpact, RoadFloodImpactRun, RoadImpactHotspot
 from core.flood_impact.services import PostGISRoadImpactService
+from core.users.infra.models import User
 
 
 class RoadImpactServiceTests(TestCase):
@@ -43,3 +47,43 @@ class RoadImpactServiceTests(TestCase):
         result = PostGISRoadImpactService().calculate(revision=self.revision(footprint), road_dataset=self.dataset)
         self.assertEqual(result.run.report["touches"], 1)
         self.assertEqual(RoadFloodImpact.objects.count(), 0)
+
+    def test_hotspot_history_exposes_revision_affected_territory_snapshot(self):
+        revision = self.revision(None)
+        revision.affected_regions = [{"id": "region-1", "name": "Região Um"}]
+        revision.affected_streets = [{"id": "street-1", "name": "Rua Um"}]
+        revision.save(update_fields=["affected_regions", "affected_streets", "updated_at"])
+        run = RoadFloodImpactRun.objects.create(
+            revision=revision, road_dataset=self.dataset, algorithm_version="test-v1",
+            status=RoadFloodImpactRun.Status.COMPLETED, started_at=timezone.now(),
+            finished_at=timezone.now(), input_hash="d" * 64,
+        )
+        hotspot = RoadImpactHotspot.objects.create(
+            run=run, location=Point(0.5, 0.5, srid=4326), impacted_length_m=20,
+            segment_count=1, dimension=RoadImpactHotspot.Dimension.STREET,
+            dimension_key="street-1", label="Rua Um",
+        )
+        client = APIClient()
+        client.force_authenticate(User.objects.create(name="Leitor", email="reader-impact@example.test"))
+        response = client.get(f"/api/flood-impact/hotspots/{hotspot.id}/history/")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        item = response.data["results"][0]
+        self.assertEqual(item["affected_regions"], revision.affected_regions)
+        self.assertEqual(item["affected_streets"], revision.affected_streets)
+
+    def test_affected_territory_migration_backfills_existing_revision_from_geometry(self):
+        from core.addressing.models import Region
+
+        Region.objects.create(name="Região de backfill", city=self.city.name, city_ref=self.city, geometry=self.city.geometry)
+        footprint = MultiPolygon(Polygon(((0, 0), (1, 0), (1, 1), (0, 1), (0, 0))), srid=4326)
+        revision = self.revision(footprint)
+        self.assertEqual(revision.affected_regions, [])
+        self.assertEqual(revision.affected_streets, [])
+
+        migration = import_module("core.flood_impact.migrations.0004_revision_affected_territory")
+        migration.backfill_affected_territory(django_apps, None)
+        revision.refresh_from_db()
+
+        self.assertEqual(revision.affected_regions[0]["name"], "Região de backfill")
+        self.assertEqual(revision.affected_streets[0]["name"], "Rua Um")

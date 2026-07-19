@@ -33,6 +33,8 @@ class FloodPointRegisterSerializer(serializers.ModelSerializer):
     footprint = serializers.JSONField(required=False, allow_null=True)
     territory_resolution = serializers.JSONField(read_only=True)
     spatial_event_id = serializers.UUIDField(read_only=True)
+    affected_regions = serializers.SerializerMethodField()
+    affected_streets = serializers.SerializerMethodField()
 
     class Meta:
         model = Flood_Point_Register
@@ -50,6 +52,8 @@ class FloodPointRegisterSerializer(serializers.ModelSerializer):
             "footprint",
             "territory_resolution",
             "spatial_event_id",
+            "affected_regions",
+            "affected_streets",
         ]
         extra_kwargs = {
             "city": {"required": False},
@@ -89,14 +93,24 @@ class FloodPointRegisterSerializer(serializers.ModelSerializer):
             and nb_input.strip()
             and not self._is_uuid(nb_input)
         ):
-            nb_qs = Neighborhood.objects.filter(name__iexact=nb_input.strip())
+            normalized_name = self._normalize_neighborhood_name(nb_input)
+            nb_qs = Neighborhood.objects.filter(
+                models.Q(normalized_name=normalized_name) | models.Q(name__iexact=nb_input.strip())
+            )
             if resolved_city is not None:
                 nb_qs = nb_qs.filter(
                     # Prefer link via city_ref when present; fallback to textual city if needed
                     models.Q(city_ref_id=resolved_city.id)
                     | models.Q(city__iexact=resolved_city.name)
                 )
-            nb = nb_qs.first()
+            # Dados antigos podem não ter normalized_name preenchido. A
+            # comparação final mantém a resolução consistente para acentos e
+            # espaços, sem exigir reimportação da base territorial.
+            nb = next(
+                (candidate for candidate in nb_qs.order_by("name", "id")
+                 if self._normalize_neighborhood_name(candidate.name) == normalized_name),
+                None,
+            )
             if not nb:
                 raise serializers.ValidationError(
                     {"neighborhood": "bairro não encontrado para a cidade informada"}
@@ -126,6 +140,26 @@ class FloodPointRegisterSerializer(serializers.ModelSerializer):
         except (TypeError, ValueError, AttributeError):
             return False
         return True
+
+    @staticmethod
+    def _normalize_neighborhood_name(value):
+        import re
+        import unicodedata
+
+        text = unicodedata.normalize("NFKD", str(value))
+        text = "".join(char for char in text if not unicodedata.combining(char))
+        return re.sub(r"\s+", " ", text).strip().casefold()
+
+    def _affected_snapshot(self, instance, field):
+        event = getattr(instance, "spatial_event", None)
+        revision = getattr(event, "current_revision", None) if event else None
+        return list(getattr(revision, field, None) or [])
+
+    def get_affected_regions(self, instance):
+        return self._affected_snapshot(instance, "affected_regions")
+
+    def get_affected_streets(self, instance):
+        return self._affected_snapshot(instance, "affected_streets")
 
     def validate_possibility(self, value: float) -> float:
         # Accept probability in [0,1]. If 1<value<=100, interpret as percentage.

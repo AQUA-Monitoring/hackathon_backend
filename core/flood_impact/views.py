@@ -13,7 +13,7 @@ from rest_framework.response import Response
 
 from core.addressing.models import City, GeodataDataset
 from core.flood_impact.models import FloodSpatialEvent, FloodSpatialEventRevision, RoadFloodImpact, RoadFloodImpactRun, RoadImpactHotspot
-from core.flood_impact.services import PostGISRoadImpactService
+from core.flood_impact.services import PostGISRoadImpactService, affected_territory_snapshot
 from core.flood_camera_monitoring.application.nearby_cameras import camera_coordinates, haversine_distance_m
 from core.flood_camera_monitoring.infra.models import Camera
 
@@ -71,6 +71,8 @@ class FloodImpactEventViewSet(viewsets.ViewSet):
                 "valid_until": revision.valid_until.isoformat() if revision.valid_until else None,
                 "location": json.loads(revision.location.geojson) if revision.location else None,
                 "footprint": json.loads(revision.footprint.geojson) if revision.footprint else None,
+                "affected_regions": revision.affected_regions,
+                "affected_streets": revision.affected_streets,
             } if revision else None),
         }
         if revision:
@@ -84,6 +86,8 @@ class FloodImpactEventViewSet(viewsets.ViewSet):
                 "valid_until": revision.valid_until.isoformat() if revision.valid_until else None,
                 "current_revision": revision.revision,
                 "metadata": revision.properties,
+                "affected_regions": revision.affected_regions,
+                "affected_streets": revision.affected_streets,
             })
         return payload
 
@@ -154,11 +158,14 @@ class FloodImpactEventViewSet(viewsets.ViewSet):
         except (KeyError, TypeError, ValueError, City.DoesNotExist) as exc:
             return self._error("invalid_input", str(exc))
         event = FloodSpatialEvent.objects.create(city=city, evidence_kind=evidence_kind, source_type=str(source["type"]), source_id=str(source["id"]))
+        affected_territory = affected_territory_snapshot(city=city, location=location, footprint=footprint)
         revision = FloodSpatialEventRevision.objects.create(
             event=event, revision=1, status=FloodSpatialEventRevision.Status.DRAFT,
             location=location, footprint=footprint, confidence=confidence, valid_from=valid_from, valid_until=valid_until,
             geometry_method=method, source_version=revision_data.get("source_version", ""),
             properties=revision_data.get("properties", revision_data.get("metadata", {})),
+            affected_regions=affected_territory["affected_regions"],
+            affected_streets=affected_territory["affected_streets"],
             author=request.user, justification=justification, source_revision=source_revision,
         )
         event.current_revision = revision
@@ -194,11 +201,14 @@ class FloodImpactEventViewSet(viewsets.ViewSet):
         if event.current_revision and event.current_revision.status == FloodSpatialEventRevision.Status.ACTIVE:
             event.current_revision.status = FloodSpatialEventRevision.Status.SUPERSEDED
             event.current_revision.save(update_fields=["status", "updated_at"])
+        affected_territory = affected_territory_snapshot(city=event.city, location=location, footprint=footprint)
         revision = FloodSpatialEventRevision.objects.create(
             event=event, revision=number, status=FloodSpatialEventRevision.Status.DRAFT, location=location, footprint=footprint,
             confidence=payload.get("confidence", current.confidence if current else None), valid_from=valid_from, valid_until=valid_until,
             geometry_method=method, source_version=payload.get("source_version", current.source_version if current else ""),
             properties=payload.get("properties", current.properties if current else {}),
+            affected_regions=affected_territory["affected_regions"],
+            affected_streets=affected_territory["affected_streets"],
             author=request.user, justification=justification, source_revision=source_revision,
         )
         event.current_revision = revision
@@ -255,6 +265,8 @@ class FloodImpactEventViewSet(viewsets.ViewSet):
             "id": str(revision.id), "number": revision.revision, "status": revision.status,
             "author_id": str(revision.author_id) if revision.author_id else None,
             "justification": revision.justification, "source_revision": revision.source_revision,
+            "affected_regions": revision.affected_regions,
+            "affected_streets": revision.affected_streets,
             "runs": [{"id": str(run.id), "status": run.status, "input_hash": run.input_hash, "algorithm_version": run.algorithm_version} for run in revision.impact_runs.all()],
         } for revision in revisions]})
 
@@ -382,4 +394,6 @@ class RoadImpactHotspotViewSet(viewsets.ViewSet):
             "valid_from": item.run.revision.valid_from.isoformat(),
             "valid_until": item.run.revision.valid_until.isoformat() if item.run.revision.valid_until else None,
             "affected_length_m": item.impacted_length_m,
+            "affected_regions": item.run.revision.affected_regions,
+            "affected_streets": item.run.revision.affected_streets,
         } for item in page])

@@ -6,9 +6,10 @@ import hashlib
 
 from django.contrib.gis.geos import LineString, MultiLineString
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
-from core.addressing.models import GeodataDataset, RoadAxisSegment
+from core.addressing.models import GeodataDataset, Region, RoadAxisSegment, Street
 from core.flood_impact.models import (
     FloodSpatialEventRevision,
     RoadFloodImpact,
@@ -42,6 +43,30 @@ def _length_m(geometry) -> float:
 class ImpactCalculationResult:
     run: RoadFloodImpactRun
     reused: bool
+
+
+def affected_territory_snapshot(*, city, location=None, footprint=None):
+    """Retorna a cobertura territorial disponível para a geometria informada.
+
+    A função é deliberadamente local: não geocodifica nem infere vias quando a
+    base oficial não possui geometria. O resultado é um snapshot serializável,
+    ordenado e sem dados de métricas que possam ficar obsoletos entre revisões.
+    """
+    geometry = footprint if footprint is not None else location
+    if geometry is None:
+        return {"affected_regions": [], "affected_streets": []}
+
+    regions = Region.objects.filter(
+        city_ref=city, is_active=True, geometry__intersects=geometry,
+    ).order_by("name", "id")
+    streets = Street.objects.filter(city=city, is_active=True).filter(
+        Q(geometry__intersects=geometry)
+        | Q(axis_segments__is_active=True, axis_segments__geometry__intersects=geometry)
+    ).distinct().order_by("name", "id")
+    return {
+        "affected_regions": [{"id": str(region.id), "name": region.name} for region in regions],
+        "affected_streets": [{"id": str(street.id), "name": street.name} for street in streets],
+    }
 
 
 class PostGISRoadImpactService:

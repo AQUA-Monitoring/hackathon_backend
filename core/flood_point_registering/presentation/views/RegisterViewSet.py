@@ -11,7 +11,7 @@ from core.flood_point_registering.presentation.serializers.RegisterSerializer im
 
 
 class FloodPointRegister(ModelViewSet):
-    queryset = Flood_Point_Register.objects.all()
+    queryset = Flood_Point_Register.objects.select_related("spatial_event__current_revision")
     serializer_class = FloodPointRegisterSerializer
 
     def get_permissions(self):
@@ -20,7 +20,7 @@ class FloodPointRegister(ModelViewSet):
         return [IsAppAdmin()]
 
     def get_queryset(self):
-        qs = Flood_Point_Register.objects.all()
+        qs = Flood_Point_Register.objects.select_related("spatial_event__current_revision")
         # Only return ACTIVE points by default in list and custom active action
         if getattr(self, "action", None) in {"list", "active"}:
             return qs.active().order_by("-created_at")
