@@ -3,6 +3,7 @@ from rest_framework import serializers
 from core.flood_point_registering.infra.models import Flood_Point_Register
 from core.addressing.infra.models import City, Neighborhood
 from django.db import models
+from uuid import UUID
 
 
 class FloodPointRegisterSerializer(serializers.ModelSerializer):
@@ -52,7 +53,11 @@ class FloodPointRegisterSerializer(serializers.ModelSerializer):
         # Resolve City from name if provided as string
         city_input = mutable.get("city")
         resolved_city = None
-        if isinstance(city_input, str) and city_input.strip():
+        if (
+            isinstance(city_input, str)
+            and city_input.strip()
+            and not self._is_uuid(city_input)
+        ):
             resolved_city = City.objects.filter(name__iexact=city_input.strip()).first()
             if not resolved_city:
                 raise serializers.ValidationError({"city": "cidade não encontrada"})
@@ -61,7 +66,11 @@ class FloodPointRegisterSerializer(serializers.ModelSerializer):
 
         # Resolve Neighborhood from name; prefer matching the resolved city when available
         nb_input = mutable.get("neighborhood")
-        if isinstance(nb_input, str) and nb_input.strip():
+        if (
+            isinstance(nb_input, str)
+            and nb_input.strip()
+            and not self._is_uuid(nb_input)
+        ):
             nb_qs = Neighborhood.objects.filter(name__iexact=nb_input.strip())
             if resolved_city is not None:
                 nb_qs = nb_qs.filter(
@@ -81,16 +90,24 @@ class FloodPointRegisterSerializer(serializers.ModelSerializer):
         if poss in (None, ""):
             mutable["possibility"] = 0.0
 
-        # Default props if null/empty -> minimal valid Feature
+        # Keep absent spatial evidence explicit; never invent a real-world point.
         props = mutable.get("props", None)
         if props in (None, ""):
             mutable["props"] = {
                 "type": "Feature",
-                "geometry": {"type": "Point", "coordinates": [0.0, 0.0]},
+                "geometry": None,
                 "properties": {},
             }
 
         return super().to_internal_value(mutable)
+
+    @staticmethod
+    def _is_uuid(value):
+        try:
+            UUID(str(value))
+        except (TypeError, ValueError, AttributeError):
+            return False
+        return True
 
     def validate_possibility(self, value: float) -> float:
         # Accept probability in [0,1]. If 1<value<=100, interpret as percentage.
