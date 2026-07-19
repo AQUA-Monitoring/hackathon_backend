@@ -6,6 +6,8 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.users.permissions import IsSyncSuperuser
+
 
 EXPORT_MODELS = [
     "addressing.City",
@@ -27,7 +29,7 @@ EXPORT_MODELS = [
 
 
 class ExportView(APIView):
-    permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
+    permission_classes = [permissions.IsAuthenticated, IsSyncSuperuser]
 
     def get(self, request):
         full_data = []

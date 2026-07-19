@@ -5,7 +5,6 @@ from core.users.serializers.auth_serializer import (
     EmailTokenObtainPairSerializer,
 )
 
-
 class EmailTokenObtainPairView(TokenObtainPairView):
     serializer_class = EmailTokenObtainPairSerializer
 

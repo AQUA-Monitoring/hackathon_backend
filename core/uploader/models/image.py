@@ -1,4 +1,3 @@
-import mimetypes
 import uuid
 from pathlib import Path
 
@@ -47,5 +46,5 @@ class Image(models.Model):
         return f"{self.description} - {self.attachment_key}"
 
     @property
-    def url(self) -> str:
-        return self.file.url  # pylint: disable=no-member
+    def url(self) -> str | None:
+        return self.file.url if self.file else None  # pylint: disable=no-member

@@ -7,6 +7,7 @@ from core.sync.registry import registry
 from core.sync.syncers import (
     sync_addressing,
     sync_cameras,
+    sync_documents,
     sync_flood_points,
     sync_forecasts,
     sync_images,
@@ -26,7 +27,15 @@ def _register_entities():
         model=None,
         sync_func=sync_images,
         dependencies=[],
-        description="Imagens e arquivos de mídia",
+        description="Imagens enviadas ao sistema",
+    )
+    registry.register(
+        key="documents",
+        endpoint="/api/upload/documents/",
+        model=None,
+        sync_func=sync_documents,
+        dependencies=[],
+        description="Documentos enviados ao sistema",
     )
     registry.register(
         key="addressing",
@@ -70,7 +79,7 @@ def _register_entities():
     )
     registry.register(
         key="weather",
-        endpoint="/api/weather/weather/",
+        endpoint="/api/weather/weather",
         model=None,
         sync_func=sync_weather,
         dependencies=["occurrences"],

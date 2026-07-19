@@ -7,8 +7,8 @@ from core.uploader.models import Document
 class DocumentUploadSerializer(serializers.ModelSerializer):
     class Meta:
         model = Document
-        fields = ["attachment_key", "file", "description", "uploaded_on"]
-        read_only_fields = ["attachment_key", "uploaded_on"]
+        fields = ["attachment_key", "file", "description", "uploaded_on", "url"]
+        read_only_fields = ["attachment_key", "uploaded_on", "url"]
         extra_kwargs = {"file": {"write_only": True}}
 
     def validate_file(self, value):

@@ -1,15 +1,10 @@
-import mimetypes
 import uuid
+from pathlib import Path
 
 from django.db import models
 
-from core.uploader.helpers.files import get_content_type
-
-
-def document_file_path(document, _) -> str:
-    content_type = get_content_type(document.file)
-    extension: str = mimetypes.guess_extension(content_type)
-
+def document_file_path(document, filename: str) -> str:
+    extension = Path(filename or "").suffix.lower()
     return f"documents/{document.public_id}{extension or ''}"
 
 
@@ -37,5 +32,5 @@ class Document(models.Model):
         return f"{self.description} - {self.file.name}"
 
     @property
-    def url(self) -> str:
-        return self.file.url  # pylint: disable=no-member
+    def url(self) -> str | None:
+        return self.file.url if self.file else None  # pylint: disable=no-member
