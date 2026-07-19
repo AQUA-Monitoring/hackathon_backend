@@ -192,6 +192,9 @@ class Street(TimestampedModel):
     city = models.ForeignKey(City, on_delete=models.PROTECT, related_name="streets")
     dataset = models.ForeignKey(GeodataDataset, on_delete=models.PROTECT, related_name="streets")
     source_record_id = models.CharField(max_length=255)
+    # Código oficial identifica o logradouro lógico; source_record_id identifica a feição.
+    official_code = models.CharField(max_length=80, blank=True)
+    source_name = models.CharField(max_length=255, blank=True)
     name = models.CharField(max_length=255)
     normalized_name = models.CharField(max_length=255, db_index=True)
     street_type = models.CharField(max_length=80, blank=True)
@@ -201,8 +204,18 @@ class Street(TimestampedModel):
     properties = models.JSONField(default=dict, blank=True)
     is_active = models.BooleanField(default=True, db_index=True)
     class Meta:
-        constraints = [models.UniqueConstraint(fields=["dataset", "source_record_id"], name="uniq_street_dataset_source")]
-        indexes = [models.Index(fields=["city", "normalized_name", "is_active"])]
+        constraints = [
+            models.UniqueConstraint(fields=["dataset", "source_record_id"], name="uniq_street_dataset_source"),
+            models.UniqueConstraint(
+                fields=["city", "dataset", "official_code"],
+                condition=Q(is_active=True) & ~Q(official_code=""),
+                name="uniq_street_city_dataset_official",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["city", "normalized_name", "is_active"]),
+            models.Index(fields=["official_code"], name="addressing_street_official_idx"),
+        ]
 
 
 class StreetNeighborhood(models.Model):

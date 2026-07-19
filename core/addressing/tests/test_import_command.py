@@ -11,7 +11,7 @@ from django.utils import timezone
 from django.contrib.gis.geos import MultiPolygon, Polygon
 
 from core.addressing.models import AddressReference, City, GeodataDataset, Neighborhood, RoadAxisSegment, Street, StreetNeighborhood
-from core.addressing.management.commands.import_addressing_dataset import chunked, geos_geometry, iter_source_features, source_street_name
+from core.addressing.management.commands.import_addressing_dataset import canonical_name, chunked, geos_geometry, iter_source_features, source_street_name
 
 
 class AddressingImportCommandTests(TestCase):
@@ -32,6 +32,23 @@ class AddressingImportCommandTests(TestCase):
             call_command("import_addressing_dataset", str(self._file(directory)), dry_run=True, **self._options())
         self.assertEqual(GeodataDataset.objects.count(), 0)
         self.assertEqual(Neighborhood.objects.count(), 0)
+
+    def test_canonical_name_preserves_words_and_accents(self):
+        self.assertEqual(canonical_name("RUA GETÚLIO VARGAS"), "Rua Getúlio Vargas")
+
+    def test_street_code_groups_logical_street_and_keeps_segments(self):
+        payload = {"type": "FeatureCollection", "features": [
+            {"type": "Feature", "properties": {"id": "seg-1", "codlogra": "42", "name": "Rua Getulio"}, "geometry": {"type": "LineString", "coordinates": [[0, 0], [1, 0]]}},
+            {"type": "Feature", "properties": {"id": "seg-2", "codlogra": "42", "name": "R. Getulio Vargas"}, "geometry": {"type": "LineString", "coordinates": [[1, 0], [2, 0]]}},
+        ]}
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "ruas.geojson"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            call_command("import_addressing_dataset", str(path), city="Joinville", kind="street", authority="SIMGeo", title="Ruas", source_url="https://example.test/ruas", license_name="SIMGeo", source_version="1", official_code_prop="codlogra")
+        self.assertEqual(Street.objects.filter(is_active=True).count(), 1)
+        self.assertEqual(Street.objects.get().official_code, "42")
+        self.assertEqual(RoadAxisSegment.objects.count(), 2)
+        self.assertEqual(set(RoadAxisSegment.objects.values_list("street_id", flat=True)), {Street.objects.get().id})
 
     def test_same_file_is_idempotent(self):
         with TemporaryDirectory() as directory:

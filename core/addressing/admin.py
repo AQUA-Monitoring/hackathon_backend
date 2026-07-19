@@ -52,9 +52,18 @@ class GeodataDatasetAdmin(admin.ModelAdmin):
 
 @admin.register(Street)
 class StreetAdmin(admin.ModelAdmin):
-    list_display = ("name", "city", "source_record_id", "is_active")
+    list_display = ("name", "official_code", "city", "source_record_id", "is_active")
     list_filter = ("city", "is_active")
-    search_fields = ("name", "source_record_id")
+    search_fields = ("name", "source_name", "normalized_name", "official_code", "source_record_id")
+
+    def get_queryset(self, request):
+        queryset = super().get_queryset(request)
+        # O catálogo operacional deve mostrar somente ruas ativas por padrão.
+        # O filtro "Ativo" continua permitindo consultar as cópias inativas
+        # preservadas para auditoria.
+        if "is_active" not in request.GET:
+            queryset = queryset.filter(is_active=True)
+        return queryset
 
 
 @admin.register(AddressReference)

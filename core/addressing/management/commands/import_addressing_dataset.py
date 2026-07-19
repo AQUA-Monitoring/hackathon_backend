@@ -27,6 +27,18 @@ def normalized(value: str) -> str:
     return " ".join(unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode().casefold().split())
 
 
+def canonical_name(value: str) -> str:
+    small_words = {"a", "ao", "aos", "as", "da", "das", "de", "do", "dos", "e", "em", "na", "nas", "no", "nos"}
+    formatted = []
+    for index, word in enumerate((value or "").strip().split()):
+        lower = word.casefold()
+        if index > 0 and lower in small_words:
+            formatted.append(lower)
+        else:
+            formatted.append("-".join(part[:1].upper() + part[1:].lower() for part in lower.split("-")))
+    return " ".join(formatted)
+
+
 def source_street_name(props: dict, options: dict) -> str:
     fields = options.get("street_props")
     if fields:
@@ -274,18 +286,21 @@ class Command(BaseCommand):
                             objects.append(Neighborhood(city=city.name, city_ref=city, dataset=dataset, source_record_id=source_id, official_code=str(props.get(o["official_code_prop"]) or "").strip(), name=name, normalized_name=normalized(name), region=region, geometry=geom, props=props))
                         Neighborhood.objects.bulk_create(objects, batch_size=o["chunk_size"])
                     elif o["kind"] == GeodataDataset.Kind.STREET:
-                        objects = [Street(city=city, dataset=dataset, source_record_id=source_id, name=(name := str(props.get(o["name_prop"]) or props.get(o["street_prop"]) or "").strip()), normalized_name=normalized(name), geometry=geom, properties=props) for source_id, props, geom in batch]
-                        Street.objects.bulk_create(objects, batch_size=o["chunk_size"])
+                        objects = []
+                        segments = []
+                        for source_id, props, geom in batch:
+                            source_name = str(props.get(o["name_prop"]) or props.get(o["street_prop"]) or "").strip()
+                            name = canonical_name(source_name)
+                            code = str(props.get(o["official_code_prop"]) or (props.get("codlogra") if o["official_code_prop"] == "official_code" else "") or "").strip()
+                            street = None
+                            if code:
+                                street = Street.objects.filter(city=city, dataset=dataset, official_code=code).first()
+                            if street is None:
+                                street = Street.objects.create(city=city, dataset=dataset, source_record_id=source_id, official_code=code, source_name=source_name, name=name, normalized_name=normalized(name), geometry=geom, properties=props)
+                                objects.append(street)
+                            segments.append(RoadAxisSegment(city=city, street=street, dataset=dataset, source_record_id=source_id, geometry=geom, road_class=str(props.get(o["road_class_prop"]) or ""), surface=str(props.get(o["surface_prop"]) or ""), direction=str(props.get(o["direction_prop"]) or ""), properties=props))
                         links = [StreetNeighborhood(street=street, neighborhood=neighborhood) for street in objects for neighborhood in neighborhoods if neighborhood.geometry.intersects(street.geometry)]
                         StreetNeighborhood.objects.bulk_create(links, batch_size=o["chunk_size"], ignore_conflicts=True)
-                        segments = [RoadAxisSegment(
-                            city=city, street=street, dataset=dataset,
-                            source_record_id=street.source_record_id, geometry=street.geometry,
-                            road_class=str(street.properties.get(o["road_class_prop"]) or ""),
-                            surface=str(street.properties.get(o["surface_prop"]) or ""),
-                            direction=str(street.properties.get(o["direction_prop"]) or ""),
-                            properties=street.properties,
-                        ) for street in objects]
                         RoadAxisSegment.objects.bulk_create(segments, batch_size=o["chunk_size"])
                         segment_links = [RoadAxisSegmentNeighborhood(segment=segment, neighborhood=neighborhood) for segment in segments for neighborhood in neighborhoods if neighborhood.geometry.intersects(segment.geometry)]
                         RoadAxisSegmentNeighborhood.objects.bulk_create(segment_links, batch_size=o["chunk_size"], ignore_conflicts=True)
