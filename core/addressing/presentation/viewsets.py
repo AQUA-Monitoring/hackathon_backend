@@ -1,13 +1,84 @@
-from rest_framework import status, viewsets
+import json
+from io import StringIO
+from pathlib import Path
+from django.conf import settings
+from django.contrib.gis.geos import Point, Polygon
+from django.contrib.gis.measure import D
+from django.contrib.gis.db.models.functions import Distance
+from django.core.management import call_command
+from django.core.management.base import CommandError
+from django.db import IntegrityError
+from rest_framework import exceptions, permissions, status, viewsets
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.decorators import action
+from django.db.models import Q
+from uuid import UUID
 
 from core.addressing.application.services import build_neighborhoods_feature_collection
 from core.addressing.infra.repositories import DjangoNeighborhoodRepository
-from core.addressing.infra.models import Region, Neighborhood
+from core.addressing.infra.models import AddressReference, City, GeodataDataset, Region, Neighborhood, Street
+from core.addressing.geojson import feature_collection
 
 
 class AddressingViewSet(viewsets.ViewSet):
+    def permission_denied(self, request, message=None, code=None):
+        payload = {"error": {"code": code or "forbidden", "detail": message or "Acesso não autorizado.", "fields": {}}}
+        if request.authenticators and not request.successful_authenticator:
+            raise exceptions.NotAuthenticated(payload)
+        raise exceptions.PermissionDenied(payload)
+
+    def get_permissions(self):
+        if self.action in {"resolve"}:
+            return [permissions.IsAuthenticated()]
+        if self.action in {"address_references", "datasets", "reports", "snapshot", "import_dataset"}:
+            return [permissions.IsAdminUser()]
+        return [permissions.AllowAny()]
+    def _error(self, code, detail, http_status=status.HTTP_400_BAD_REQUEST, fields=None):
+        return Response({"error": {"code": code, "detail": detail, "fields": fields or {}}}, status=http_status)
+
+    def _paginate(self, request, queryset, mapper):
+        paginator = PageNumberPagination()
+        paginator.page_size = 100
+        paginator.page_size_query_param = "page_size"
+        paginator.max_page_size = 500
+        page = paginator.paginate_queryset(queryset, request)
+        return paginator.get_paginated_response([mapper(item) for item in page])
+
+    def _require(self, request, admin=False):
+        allowed = request.user and request.user.is_authenticated and (not admin or request.user.is_staff)
+        return None if allowed else self._error("forbidden", "Acesso não autorizado.", status.HTTP_403_FORBIDDEN)
+
+    def _uuid_filter(self, request, name):
+        value = request.query_params.get(name)
+        if not value:
+            return None, None
+        try:
+            return UUID(value), None
+        except (TypeError, ValueError, AttributeError):
+            return None, self._error("invalid_filter", f"{name} deve ser um UUID válido.", fields={name: ["UUID inválido."]})
+
+    def _bbox_filter(self, request):
+        raw = request.query_params.get("bbox")
+        if not raw:
+            return None, None
+        try:
+            west, south, east, north = (float(value) for value in raw.split(","))
+            if west >= east or south >= north or not (-180 <= west <= 180 and -180 <= east <= 180 and -90 <= south <= 90 and -90 <= north <= 90):
+                raise ValueError
+        except (TypeError, ValueError):
+            return None, self._error("invalid_filter", "bbox deve ser west,south,east,north em EPSG:4326.", fields={"bbox": ["BBox inválido."]})
+        return Polygon.from_bbox((west, south, east, north)), None
+    @action(detail=False, methods=["get"], url_path="cities")
+    def cities(self, request):
+        data = [
+            {"id": str(city.id), "name": city.name}
+            for city in City.objects.all().order_by("name")
+        ]
+        return Response(
+            {"count": len(data), "results": data}, status=status.HTTP_200_OK
+        )
+
     @action(detail=False, methods=["get"], url_path="regions-neighborhoods")
     def regions_neighborhoods(self, request):
         """Return regions and their neighborhoods, optionally filtered by city.
@@ -27,9 +98,38 @@ class AddressingViewSet(viewsets.ViewSet):
         }
         """
         city = request.query_params.get("city")
+        city_id = request.query_params.get("city_id")
+        if city and city_id:
+            return Response(
+                {
+                    "detail": "Use somente city_id ou city.",
+                    "code": "invalid_filter",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        city_ref = None
+        if city_id:
+            try:
+                city_ref = City.objects.filter(pk=city_id).first()
+            except (ValueError, TypeError):
+                city_ref = None
+            if city_ref is None:
+                return Response(
+                    {
+                        "detail": "city_id inválido ou não encontrado.",
+                        "code": "invalid_filter",
+                        "city_id": ["Cidade não encontrada."],
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            city = city_ref.name
 
         regions_qs = Region.objects.all()
-        if city:
+        if city_ref:
+            regions_qs = regions_qs.filter(
+                Q(city_ref_id=city_ref.id) | Q(city__iexact=city_ref.name)
+            )
+        elif city:
             regions_qs = regions_qs.filter(city__iexact=city)
         regions_qs = regions_qs.order_by("name").prefetch_related("neighborhoods")
 
@@ -37,11 +137,16 @@ class AddressingViewSet(viewsets.ViewSet):
         total_nb = 0
         for reg in regions_qs:
             # Restrict neighborhoods to same city (defensive)
-            nbs = [
-                nb
-                for nb in reg.neighborhoods.all()
-                if not city or nb.city.lower() == reg.city.lower()
-            ]
+            nbs = []
+            for nb in reg.neighborhoods.all():
+                if city_ref and not (
+                    nb.city_ref_id == city_ref.id
+                    or nb.city.strip().casefold() == city_ref.name.strip().casefold()
+                ):
+                    continue
+                if not city_ref and city and nb.city.strip().casefold() != city.strip().casefold():
+                    continue
+                nbs.append(nb)
             nbs_sorted = sorted(nbs, key=lambda x: (x.name or ""))
             total_nb += len(nbs_sorted)
             payload_regions.append(
@@ -49,9 +154,20 @@ class AddressingViewSet(viewsets.ViewSet):
                     "id": str(reg.id),
                     "name": reg.name,
                     "city": reg.city,
+                    "city_id": str(reg.city_ref_id or city_ref.id) if (reg.city_ref_id or city_ref) else None,
                     "neighborhood_count": len(nbs_sorted),
                     "neighborhoods": [
-                        {"id": str(nb.id), "name": nb.name, "city": nb.city}
+                        {
+                            "id": str(nb.id),
+                            "name": nb.name,
+                            "city": nb.city,
+                            "city_id": (
+                                str(nb.city_ref_id or city_ref.id)
+                                if (nb.city_ref_id or city_ref)
+                                else None
+                            ),
+                            "region": {"id": str(reg.id), "name": reg.name},
+                        }
                         for nb in nbs_sorted
                     ],
                 }
@@ -60,6 +176,7 @@ class AddressingViewSet(viewsets.ViewSet):
         return Response(
             {
                 "city": city or None,
+                "city_id": str(city_ref.id) if city_ref else None,
                 "total_regions": len(payload_regions),
                 "total_neighborhoods": total_nb,
                 "regions": payload_regions,
@@ -106,3 +223,159 @@ class AddressingViewSet(viewsets.ViewSet):
             repo, all_flag=all_flag, city=city, region=region
         )
         return Response(collection, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"], url_path="territories")
+    def territories(self, request):
+        """FeatureCollection territorial canônica para o mapa."""
+        city_id, error = self._uuid_filter(request, "city_id")
+        if error: return error
+        bbox, error = self._bbox_filter(request)
+        if error: return error
+        kind_filter = request.query_params.get("type")
+        if kind_filter and kind_filter not in {"city", "region", "neighborhood"}:
+            return self._error("invalid_filter", "type deve ser city, region ou neighborhood.", fields={"type": ["Tipo inválido."]})
+        dataset_version = request.query_params.get("dataset_version")
+        if city_id and not City.objects.filter(pk=city_id).exists():
+            return self._error("invalid_filter", "city_id não encontrado.", fields={"city_id": ["Cidade não encontrada."]})
+        qs_city = City.objects.filter(pk=city_id) if city_id else City.objects.all()
+        qs_region = Region.objects.filter(city_ref_id=city_id) if city_id else Region.objects.all()
+        qs_nb = Neighborhood.objects.filter(city_ref_id=city_id) if city_id else Neighborhood.objects.all()
+        if bbox:
+            qs_city = qs_city.filter(geometry__intersects=bbox)
+            qs_region = qs_region.filter(geometry__intersects=bbox)
+            qs_nb = qs_nb.filter(geometry__intersects=bbox)
+        if dataset_version:
+            qs_city = qs_city.filter(geometry_dataset__source_version=dataset_version)
+            qs_region = qs_region.filter(dataset__source_version=dataset_version)
+            qs_nb = qs_nb.filter(dataset__source_version=dataset_version)
+        features = []
+        for model_qs, kind in ((qs_city, "city"), (qs_region, "region"), (qs_nb, "neighborhood")):
+            if kind_filter and kind_filter != kind:
+                continue
+            features.extend(feature_collection(model_qs.order_by("name"), kind=kind)["features"])
+        return Response({"type": "FeatureCollection", "features": features})
+
+    @action(detail=False, methods=["get"], url_path="streets")
+    def streets(self, request):
+        qs = Street.objects.filter(is_active=True).select_related("city", "dataset").order_by("name", "id")
+        city_id, error = self._uuid_filter(request, "city_id")
+        if error: return error
+        neighborhood_id, error = self._uuid_filter(request, "neighborhood_id")
+        if error: return error
+        bbox, error = self._bbox_filter(request)
+        if error: return error
+        include_geometry = request.query_params.get("include_geometry", "false").lower()
+        if include_geometry not in {"true", "false"}:
+            return self._error("invalid_filter", "include_geometry deve ser true ou false.", fields={"include_geometry": ["Booleano inválido."]})
+        if city_id:
+            qs = qs.filter(city_id=city_id)
+        if neighborhood_id:
+            qs = qs.filter(neighborhood_links__neighborhood_id=neighborhood_id)
+        if request.query_params.get("search"):
+            qs = qs.filter(name__icontains=request.query_params["search"])
+        if bbox:
+            qs = qs.filter(geometry__intersects=bbox)
+        return self._paginate(request, qs.distinct(), lambda s: {"id": str(s.id), "city_id": str(s.city_id), "name": s.name, "type": s.street_type, **({"geometry": json.loads(s.geometry.geojson) if s.geometry else None} if include_geometry == "true" else {}), "dataset_id": str(s.dataset_id)})
+
+    @action(detail=False, methods=["get"], url_path="address-references")
+    def address_references(self, request):
+        denied = self._require(request, admin=True)
+        if denied: return denied
+        qs = AddressReference.objects.filter(is_active=True).select_related("city", "street").order_by("street_name", "number", "id")
+        for param, field in (("city_id", "city_id"), ("street_id", "street_id"), ("zipcode", "zipcode"), ("number", "number")):
+            if request.query_params.get(param): qs = qs.filter(**{field: request.query_params[param]})
+        return self._paginate(request, qs, lambda a: {"id": str(a.id), "city_id": str(a.city_id), "street_id": str(a.street_id) if a.street_id else None, "street": a.street_name, "number": a.number, "zipcode": a.zipcode, "location": json.loads(a.location.geojson)})
+
+    @action(detail=False, methods=["get"], url_path="resolve")
+    def resolve(self, request):
+        denied = self._require(request)
+        if denied: return denied
+        try:
+            lon_raw = request.query_params.get("lon", request.query_params.get("longitude"))
+            lat_raw = request.query_params.get("lat", request.query_params.get("latitude"))
+            lon, lat = float(lon_raw), float(lat_raw)
+            if not (-180 <= lon <= 180 and -90 <= lat <= 90): raise ValueError
+        except (KeyError, TypeError, ValueError):
+            return self._error("invalid_coordinates", "Latitude/longitude EPSG:4326 são obrigatórias.")
+        point = Point(lon, lat, srid=4326)
+        try:
+            radius = float(request.query_params.get("radius_m", getattr(settings, "ADDRESSING_RESOLVE_RADIUS_METERS", 200)))
+            if not 0 < radius <= getattr(settings, "ADDRESSING_RESOLVE_MAX_RADIUS_METERS", 1000):
+                raise ValueError
+        except (TypeError, ValueError):
+            return self._error("invalid_filter", "radius_m deve estar dentro do limite permitido.", fields={"radius_m": ["Raio inválido."]})
+        city = City.objects.filter(geometry__covers=point).first()
+        neighborhood = Neighborhood.objects.filter(is_active=True, geometry__covers=point).select_related("region", "city_ref").first()
+        city_id = neighborhood.city_ref_id if neighborhood else (city.id if city else None)
+        address_qs = AddressReference.objects.filter(is_active=True)
+        if city_id:
+            address_qs = address_qs.filter(city_id=city_id, location__distance_lte=(point, D(m=radius)))
+        else:
+            address_qs = address_qs.none()
+        address = address_qs.annotate(distance=Distance("location", point)).order_by("distance").first()
+        return Response({"crs": "EPSG:4326", "city": {"id": str(city_id), "name": neighborhood.city_ref.name if neighborhood and neighborhood.city_ref else city.name} if city_id else None, "neighborhood": {"id": str(neighborhood.id), "name": neighborhood.name} if neighborhood else None, "region": {"id": str(neighborhood.region_id), "name": neighborhood.region.name} if neighborhood and neighborhood.region_id else None, "nearest_address": {"id": str(address.id), "street": address.street_name, "number": address.number, "distance": address.distance.m, "match_type": "nearest"} if address else None})
+
+    @action(detail=False, methods=["post"], url_path="import-dataset")
+    def import_dataset(self, request):
+        """Executa importação síncrona de arquivo previamente disponibilizado no diretório seguro."""
+        denied = self._require(request, admin=True)
+        if denied: return denied
+        import_root = Path(getattr(settings, "GEODATA_IMPORT_ROOT", settings.BASE_DIR / "data" / "geodata")).resolve()
+        candidate = request.data.get("path")
+        if not isinstance(candidate, str) or not candidate:
+            return self._error("invalid_filter", "path relativo é obrigatório.", fields={"path": ["Campo obrigatório."]})
+        path = (import_root / candidate).resolve()
+        if import_root not in path.parents or not path.is_file():
+            return self._error("invalid_filter", "Arquivo indisponível no diretório autorizado.", fields={"path": ["Caminho inválido."]})
+        if path.stat().st_size > getattr(settings, "GEODATA_IMPORT_MAX_BYTES", 50 * 1024 * 1024):
+            return self._error("invalid_filter", "Arquivo excede o limite de importação.", fields={"path": ["Arquivo muito grande."]})
+        options = {key.replace("-", "_"): value for key, value in request.data.items() if key != "path"}
+        output = StringIO()
+        try:
+            call_command("import_addressing_dataset", str(path), stdout=output, **options)
+        except IntegrityError:
+            return self._error("dataset_conflict", "Conflito com edição ativa do dataset.", status.HTTP_409_CONFLICT)
+        except CommandError as exc:
+            detail = str(exc)
+            if "Geometria inválida" in detail or "geometria" in detail.casefold():
+                return self._error("invalid_geometry", detail, status.HTTP_422_UNPROCESSABLE_ENTITY)
+            return self._error("invalid_filter", detail)
+        try:
+            payload = json.loads(output.getvalue().strip().splitlines()[-1])
+        except (IndexError, json.JSONDecodeError):
+            payload = {"detail": output.getvalue().strip()}
+        return Response(payload, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"], url_path="datasets")
+    def datasets(self, request):
+        denied = self._require(request, admin=True)
+        if denied: return denied
+        qs = GeodataDataset.objects.select_related("city").order_by("-retrieved_at")
+        return self._paginate(request, qs, lambda d: {"id": str(d.id), "city_id": str(d.city_id), "kind": d.kind, "authority": d.authority, "source_version": d.source_version, "status": d.status, "sha256": d.sha256, "license": {"name": d.license_name, "url": d.license_url}})
+
+    @action(detail=False, methods=["get"], url_path="reports")
+    def reports(self, request):
+        denied = self._require(request, admin=True)
+        if denied: return denied
+        qs = GeodataDataset.objects.select_related("city").order_by("-retrieved_at")
+        return self._paginate(request, qs, lambda d: {"dataset_id": str(d.id), "city": d.city.name, "kind": d.kind, "status": d.status, "report": d.metadata.get("report", {}), "counts": {"regions": d.regions.count(), "neighborhoods": d.neighborhoods.count(), "streets": d.streets.count(), "addresses": d.address_references.count()}})
+
+    @action(detail=False, methods=["get"], url_path="snapshot")
+    def snapshot(self, request):
+        denied = self._require(request, admin=True)
+        if denied: return denied
+        kind = request.query_params.get("kind")
+        models = {"datasets": GeodataDataset, "cities": City, "regions": Region, "neighborhoods": Neighborhood, "streets": Street, "addresses": AddressReference}
+        if kind not in models: return self._error("invalid_kind", "kind deve ser datasets, cities, regions, neighborhoods, streets ou addresses.")
+        qs = models[kind].objects.all().order_by("pk")
+        def serialize(o):
+            base = {"id": str(o.pk), "kind": kind}
+            if kind == "datasets": base.update({"city_id": str(o.city_id), "dataset_kind": o.kind, "authority": o.authority, "title": o.title, "source_url": o.source_url, "license_name": o.license_name, "license_url": o.license_url, "source_version": o.source_version, "published_at": o.published_at.isoformat() if o.published_at else None, "retrieved_at": o.retrieved_at.isoformat(), "source_crs": o.source_crs, "sha256": o.sha256, "status": o.status, "metadata": o.metadata})
+            elif kind == "cities": base.update({"name": o.name, "official_code": o.official_code, "normalized_name": o.normalized_name, "is_active": o.is_active, "source_record_id": o.source_record_id, "dataset_id": str(o.geometry_dataset_id) if o.geometry_dataset_id else None, "geometry": json.loads(o.geometry.geojson) if o.geometry else None, "geometry_metadata": o.geometry_metadata})
+            elif kind in {"regions", "neighborhoods"}:
+                base.update({"name": o.name, "official_code": o.official_code, "normalized_name": o.normalized_name, "city": o.city, "city_id": str(o.city_ref_id) if o.city_ref_id else None, "dataset_id": str(o.dataset_id) if o.dataset_id else None, "source_record_id": o.source_record_id, "geometry": json.loads(o.geometry.geojson) if o.geometry else None, "geometry_metadata": o.geometry_metadata, "properties": o.props, "is_active": o.is_active})
+                if kind == "neighborhoods": base["region_id"] = str(o.region_id) if o.region_id else None
+            elif kind == "streets": base.update({"city_id": str(o.city_id), "dataset_id": str(o.dataset_id), "source_record_id": o.source_record_id, "name": o.name, "normalized_name": o.normalized_name, "street_type": o.street_type, "zipcode_from": o.zipcode_from, "zipcode_to": o.zipcode_to, "geometry": json.loads(o.geometry.geojson) if o.geometry else None, "properties": o.properties, "is_active": o.is_active})
+            else: base.update({"city_id": str(o.city_id), "neighborhood_id": str(o.neighborhood_id) if o.neighborhood_id else None, "dataset_id": str(o.dataset_id), "source_record_id": o.source_record_id, "street_id": str(o.street_id) if o.street_id else None, "street": o.street_name, "number": o.number, "modifier": o.modifier, "address_type": o.address_type, "species": o.species, "complement": o.complement, "zipcode": o.zipcode, "location": json.loads(o.location.geojson), "properties": o.properties, "is_active": o.is_active})
+            return base
+        return self._paginate(request, qs, serialize)

@@ -8,6 +8,7 @@ from core.flood_camera_monitoring.presentation.demo_views import (
     DemoStatusView,
 )
 from core.flood_camera_monitoring.presentation.viewsets import (
+    CameraMetadataViewSet,
     FloodMonitoringViewSet,
     HealthcheckView,
 )
@@ -21,13 +22,23 @@ urlpatterns = [
     ),
     path(
         "predict/all/",
-        FloodMonitoringViewSet.as_view({"get": "predict_all"}),
+        CameraMetadataViewSet.as_view({"get": "predict_all"}),
         name="predict-all-cameras",
     ),
     path(
         "cameras/",
-        FloodMonitoringViewSet.as_view({"get": "cameras"}),
+        CameraMetadataViewSet.as_view({"get": "list", "post": "create"}),
         name="cameras-list",
+    ),
+    path(
+        "cameras/<uuid:pk>/",
+        CameraMetadataViewSet.as_view({"get": "retrieve"}),
+        name="cameras-detail",
+    ),
+    path(
+        "cameras/<uuid:pk>/nearby/",
+        CameraMetadataViewSet.as_view({"get": "nearby"}),
+        name="cameras-nearby",
     ),
     path("health/", HealthcheckView.as_view(), name="flood-health"),
     path("demo", DemoStatusView.as_view(), name="demo-status"),

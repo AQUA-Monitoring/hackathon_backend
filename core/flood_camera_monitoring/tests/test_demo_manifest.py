@@ -127,3 +127,9 @@ class DemoManifestTests(TestCase):
                 self.assertRaisesRegex(DemoManifestError, "is not configured"),
             ):
                 load_scenario(path, video_resolver=Mock())
+
+    def test_operational_manifest_rejects_local_files(self):
+        with TemporaryDirectory() as directory:
+            path = self._write_scenario(Path(directory))
+            with self.assertRaisesRegex(DemoManifestError, "somente vídeos do uploader"):
+                load_scenario(path, require_uploader=True)

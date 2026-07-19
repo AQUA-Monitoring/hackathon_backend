@@ -35,6 +35,7 @@ class DemoStreamController:
         *,
         public_hls_url: str,
         internal_base_url: str,
+        source_type: str = "scenario",
     ) -> None:
         self.scenario = scenario
         self.work_dir = Path(work_dir)
@@ -42,6 +43,7 @@ class DemoStreamController:
         self.hls_dir = self.work_dir / "hls"
         self.public_hls_url = public_hls_url
         self.internal_base_url = internal_base_url.rstrip("/")
+        self.source_type = source_type
         self.logger = logging.getLogger(__name__)
         self._lock = threading.RLock()
         self._process: subprocess.Popen[bytes] | None = None
@@ -257,6 +259,7 @@ class DemoStreamController:
                 "demo_state": self.state,
                 "available_states": list(self.scenario.available_states),
                 "scenario": scenario_as_dict(self.scenario),
+                "source": {"type": self.source_type, "status": "resolved"},
                 "current_phase": latest["phase"] if latest else None,
                 "hls_url": self.public_hls_url,
                 "segment": latest,

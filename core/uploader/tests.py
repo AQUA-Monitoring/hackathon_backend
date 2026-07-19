@@ -9,6 +9,7 @@ from rest_framework.test import APIClient
 
 from core.uploader.models import Image, Video
 from core.uploader.serializers import ImageUploadSerializer
+from core.users.infra.models import User
 
 
 class UploadSerializerTests(TestCase):
@@ -17,6 +18,12 @@ class UploadSerializerTests(TestCase):
         self.settings_override = override_settings(MEDIA_ROOT=self.media_root)
         self.settings_override.enable()
         self.client = APIClient()
+        self.admin = User.objects.create(
+            name="Administrador",
+            email="admin-upload@example.com",
+            type=User.UserType.ADMIN,
+        )
+        self.client.force_authenticate(user=self.admin)
 
     def tearDown(self):
         self.settings_override.disable()

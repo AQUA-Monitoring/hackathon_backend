@@ -1,14 +1,25 @@
-from django.db import models
+from django.contrib.gis.db import models
+from django.db.models import Q
 import uuid
 
+from core.common.models import TimestampedModel
 
-class City(models.Model):
+
+class City(TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=120, unique=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    official_code = models.CharField(max_length=32, blank=True, db_index=True)
+    normalized_name = models.CharField(max_length=120, blank=True, db_index=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    geometry = models.MultiPolygonField(srid=4326, null=True, blank=True)
+    geometry_metadata = models.JSONField(default=dict, blank=True)
+    source_record_id = models.CharField(max_length=255, blank=True)
+    geometry_dataset = models.ForeignKey("addressing.GeodataDataset", null=True, blank=True, on_delete=models.PROTECT, related_name="cities")
 
     class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["official_code"], condition=~Q(official_code=""), name="uniq_city_official_code"),
+        ]
         indexes = [
             models.Index(fields=["name"]),
         ]
@@ -17,11 +28,28 @@ class City(models.Model):
         return self.name
 
 
-class Address(models.Model):
+class Address(TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     street = models.CharField(max_length=255)
     number = models.CharField(max_length=50, blank=True)
     city = models.CharField(max_length=120)
+    city_ref = models.ForeignKey(
+        "addressing.City",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="addresses",
+    )
+    street_ref = models.ForeignKey("addressing.Street", null=True, blank=True, on_delete=models.PROTECT, related_name="legacy_addresses")
+    address_reference = models.ForeignKey(
+        "addressing.AddressReference",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="operational_addresses",
+    )
+    dataset = models.ForeignKey("addressing.GeodataDataset", null=True, blank=True, on_delete=models.PROTECT, related_name="legacy_addresses")
+    source_record_id = models.CharField(max_length=255, blank=True)
     state = models.CharField(max_length=80, blank=True)
     country = models.CharField(max_length=120, default="Brazil")
     zipcode = models.CharField(max_length=32, blank=True)
@@ -34,9 +62,6 @@ class Address(models.Model):
         on_delete=models.SET_NULL,
         related_name="addresses",
     )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
     class Meta:
         indexes = [
             models.Index(fields=["city"]),
@@ -52,9 +77,11 @@ class Address(models.Model):
         return f"{base} - {self.city}/{self.state or ''}"
 
 
-class Neighborhood(models.Model):
+class Neighborhood(TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255)
+    official_code = models.CharField(max_length=64, blank=True)
+    normalized_name = models.CharField(max_length=255, blank=True, db_index=True)
     city = models.CharField(max_length=120)
     city_ref = models.ForeignKey(
         "addressing.City",
@@ -71,12 +98,17 @@ class Neighborhood(models.Model):
         related_name="neighborhoods",
     )
     props = models.JSONField(default=dict, blank=True)
-    # Store area in km^2 as a first-class field; geometry remains inside props
+    geometry = models.MultiPolygonField(srid=4326, null=True, blank=True)
+    geometry_metadata = models.JSONField(default=dict, blank=True)
+    dataset = models.ForeignKey("addressing.GeodataDataset", null=True, blank=True, on_delete=models.PROTECT, related_name="neighborhoods")
+    source_record_id = models.CharField(max_length=255, blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    # Store area in km^2 as a first-class field.
     area_km2 = models.FloatField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
     class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["city_ref", "official_code"], condition=~Q(official_code=""), name="uniq_neigh_city_official"),
+        ]
         indexes = [
             models.Index(fields=["city"]),
             models.Index(fields=["name"]),
@@ -87,9 +119,11 @@ class Neighborhood(models.Model):
         return f"Neighborhood {self.name} - {self.city}"
 
 
-class Region(models.Model):
+class Region(TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255)
+    official_code = models.CharField(max_length=64, blank=True)
+    normalized_name = models.CharField(max_length=255, blank=True, db_index=True)
     city = models.CharField(max_length=120)
     city_ref = models.ForeignKey(
         "addressing.City",
@@ -99,13 +133,100 @@ class Region(models.Model):
         related_name="regions",
     )
     props = models.JSONField(default=dict, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
+    geometry = models.MultiPolygonField(srid=4326, null=True, blank=True)
+    geometry_metadata = models.JSONField(default=dict, blank=True)
+    dataset = models.ForeignKey("addressing.GeodataDataset", null=True, blank=True, on_delete=models.PROTECT, related_name="regions")
+    source_record_id = models.CharField(max_length=255, blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
     class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["city_ref", "official_code"], condition=~Q(official_code=""), name="uniq_region_city_official"),
+        ]
         indexes = [
             models.Index(fields=["city"]),
         ]
 
     def __str__(self) -> str:  # pragma: no cover
         return f"Region {self.name} - {self.city}"
+
+
+class GeodataDataset(TimestampedModel):
+    class Kind(models.TextChoices):
+        CITY = "city_boundary", "Limite municipal"
+        REGION = "region_boundary", "Limite regional"
+        NEIGHBORHOOD = "neighborhood_boundary", "Limite de bairro"
+        STREET = "street", "Logradouro"
+        ADDRESS = "address_point", "Ponto de endereço"
+    class Status(models.TextChoices):
+        STAGED = "staged", "Preparado"
+        ACTIVE = "active", "Ativo"
+        SUPERSEDED = "superseded", "Substituído"
+        FAILED = "failed", "Falhou"
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    city = models.ForeignKey(City, on_delete=models.PROTECT, related_name="datasets")
+    kind = models.CharField(max_length=32, choices=Kind.choices)
+    authority = models.CharField(max_length=255)
+    title = models.CharField(max_length=255)
+    source_url = models.URLField(max_length=1000)
+    license_name = models.CharField(max_length=255)
+    license_url = models.URLField(max_length=1000, blank=True)
+    source_version = models.CharField(max_length=120)
+    published_at = models.DateField(null=True, blank=True)
+    retrieved_at = models.DateTimeField()
+    sha256 = models.CharField(max_length=64)
+    source_crs = models.CharField(max_length=32)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.STAGED)
+    metadata = models.JSONField(default=dict, blank=True)
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["city", "kind", "authority", "sha256"], name="uniq_geodata_source_sha"),
+            models.UniqueConstraint(fields=["city", "kind", "authority"], condition=Q(status="active"), name="uniq_active_geodata_source"),
+        ]
+        indexes = [models.Index(fields=["city", "kind", "status"])]
+
+
+class Street(TimestampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    city = models.ForeignKey(City, on_delete=models.PROTECT, related_name="streets")
+    dataset = models.ForeignKey(GeodataDataset, on_delete=models.PROTECT, related_name="streets")
+    source_record_id = models.CharField(max_length=255)
+    name = models.CharField(max_length=255)
+    normalized_name = models.CharField(max_length=255, db_index=True)
+    street_type = models.CharField(max_length=80, blank=True)
+    zipcode_from = models.CharField(max_length=32, blank=True)
+    zipcode_to = models.CharField(max_length=32, blank=True)
+    geometry = models.MultiLineStringField(srid=4326, null=True, blank=True)
+    properties = models.JSONField(default=dict, blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["dataset", "source_record_id"], name="uniq_street_dataset_source")]
+        indexes = [models.Index(fields=["city", "normalized_name", "is_active"])]
+
+
+class StreetNeighborhood(models.Model):
+    street = models.ForeignKey(Street, on_delete=models.CASCADE, related_name="neighborhood_links")
+    neighborhood = models.ForeignKey(Neighborhood, on_delete=models.PROTECT, related_name="street_links")
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["street", "neighborhood"], name="uniq_street_neighborhood")]
+
+
+class AddressReference(TimestampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    city = models.ForeignKey(City, on_delete=models.PROTECT, related_name="address_references")
+    neighborhood = models.ForeignKey(Neighborhood, null=True, blank=True, on_delete=models.PROTECT, related_name="address_references")
+    street = models.ForeignKey(Street, null=True, blank=True, on_delete=models.PROTECT, related_name="address_references")
+    dataset = models.ForeignKey(GeodataDataset, on_delete=models.PROTECT, related_name="address_references")
+    source_record_id = models.CharField(max_length=255)
+    street_name = models.CharField(max_length=255)
+    number = models.CharField(max_length=50, blank=True)
+    modifier = models.CharField(max_length=80, blank=True)
+    address_type = models.CharField(max_length=120, blank=True)
+    species = models.CharField(max_length=120, blank=True)
+    zipcode = models.CharField(max_length=32, blank=True)
+    complement = models.CharField(max_length=255, blank=True)
+    location = models.PointField(srid=4326)
+    properties = models.JSONField(default=dict, blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["dataset", "source_record_id"], name="uniq_addressref_dataset_source")]
+        indexes = [models.Index(fields=["city", "street_name", "number"])]

@@ -12,6 +12,7 @@ def _to_domain_neighborhood(m: orm.Neighborhood) -> d_entities.Neighborhood:
         city=m.city,
         region_id=str(m.region_id) if m.region_id else "",
         props=m.props or {},
+        geometry=(__import__("json").loads(m.geometry.geojson) if m.geometry else None),
     )
 
 
@@ -21,6 +22,7 @@ def _to_domain_region(m: orm.Region) -> d_entities.Region:
         name=m.name,
         city=m.city,
         props=m.props or {},
+        geometry=(__import__("json").loads(m.geometry.geojson) if m.geometry else None),
     )
 
 

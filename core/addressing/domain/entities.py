@@ -55,6 +55,7 @@ class Neighborhood:
     city: str
     region_id: str
     props: dict | None = None
+    geometry: dict | None = None
 
     def __post_init__(self) -> None:
         if not self.name or not self.city:

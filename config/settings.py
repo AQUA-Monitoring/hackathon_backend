@@ -21,6 +21,13 @@ load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Importações administrativas aceitam apenas arquivos previamente colocados
+# neste diretório; não há upload arbitrário pela API.
+GEODATA_IMPORT_ROOT = BASE_DIR / "data" / "geodata"
+GEODATA_IMPORT_MAX_BYTES = 50 * 1024 * 1024
+ADDRESSING_RESOLVE_RADIUS_METERS = 200
+ADDRESSING_RESOLVE_MAX_RADIUS_METERS = 1000
+
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
@@ -63,6 +70,7 @@ CORS_ALLOWED_ORIGINS = [
 # Application definition
 
 INSTALLED_APPS = [
+    "django.contrib.gis",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -158,6 +166,8 @@ DATABASES = {
         default=_db_url or f"sqlite:///{BASE_DIR / 'db.sqlite3'}"
     )
 }
+if DATABASES["default"]["ENGINE"] == "django.db.backends.postgresql":
+    DATABASES["default"]["ENGINE"] = "django.contrib.gis.db.backends.postgis"
 
 
 # Password validation
@@ -242,6 +252,11 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Redis / Celery configuration (allow overrides from env)
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/1")
+
+# Uma leitura operacional deixa de representar o estado atual após dez minutos.
+FLOOD_ANALYSIS_STALE_SECONDS = int(
+    os.getenv("FLOOD_ANALYSIS_STALE_SECONDS", "600")
+)
 
 # Optional: simple beat schedule to validate the worker periodically
 from celery.schedules import crontab  # type: ignore

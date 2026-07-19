@@ -47,12 +47,14 @@ class Command(BaseCommand):
             scenario = load_scenario(
                 options["scenario"],
                 video_resolver=UploadedVideoResolver(options["work_dir"]),
+                require_uploader=True,
             )
             controller = DemoStreamController(
                 scenario,
                 options["work_dir"],
                 public_hls_url=public_url,
                 internal_base_url=internal_url,
+                source_type="uploader",
             )
             controller.initialize()
         except (DemoManifestError, DemoStreamError) as exc:

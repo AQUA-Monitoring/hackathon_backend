@@ -9,6 +9,7 @@ flood e stream da demo.
 | Modo | Comando | Serviços adicionais |
 |---|---|---|
 | Dev base | docker compose -p aqua-dev up --build | Nenhum: web, worker, db e redis |
+| Dev API de câmeras | docker compose -p aqua-dev --profile flood up -d --build web worker flood-api | flood-api, sem agenda nem captura automática |
 | Dev câmeras | docker compose -p aqua-dev --profile flood up --build | flood-api, flood-worker e beat |
 | Dev demo | docker compose -p aqua-dev --profile demo up --build | demo-stream |
 | Dev câmeras + demo | docker compose -p aqua-dev --profile flood --profile demo up --build | Todos os opcionais |
@@ -17,6 +18,12 @@ flood e stream da demo.
 No dev base, web e worker usam a imagem base, sem Torch, Torchvision, OpenCV,
 FFmpeg ou download de modelo. As rotas de Flood Monitoring respondem 503
 estável enquanto flood-api estiver desligado.
+
+O modo **Dev API de câmeras** é o mais indicado para trabalhar em cadastro,
+admin, listagem, snapshots já persistidos e integração frontend. Ele mantém a
+API especializada disponível, mas não inicia `beat` nem `flood-worker`; assim,
+nenhuma câmera é consultada automaticamente. Ative o perfil flood completo
+somente quando a captura e a análise assíncrona fizerem parte do teste.
 
 ## Topologia
 
@@ -96,6 +103,7 @@ attachment_key da resposta para o arquivo .env:
 
 ~~~bash
 curl -f -X POST http://localhost:8001/api/upload/videos/ \
+  -H 'Authorization: Bearer <JWT_DE_ADMIN>' \
   -F 'description=Demo de alagamento' \
   -F 'file=@/caminho/para/demo.mp4'
 

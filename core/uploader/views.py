@@ -1,4 +1,4 @@
-from rest_framework import mixins, parsers, viewsets
+from rest_framework import mixins, parsers, permissions, viewsets
 
 from core.uploader.models import Document, Image, Video
 from core.uploader.serializers import (
@@ -6,6 +6,7 @@ from core.uploader.serializers import (
     ImageUploadSerializer,
     VideoUploadSerializer,
 )
+from core.users.permissions import IsAppAdmin
 
 
 class CreateViewSet(mixins.ListModelMixin, mixins.CreateModelMixin, viewsets.GenericViewSet):
@@ -28,3 +29,6 @@ class VideoUploadViewSet(CreateViewSet):
     queryset = Video.objects.all()  # pylint: disable=no-member
     serializer_class = VideoUploadSerializer
     parser_classes = [parsers.FormParser, parsers.MultiPartParser]
+
+    def get_permissions(self):
+        return [permissions.IsAuthenticated(), IsAppAdmin()]

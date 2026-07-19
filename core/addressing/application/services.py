@@ -11,8 +11,12 @@ def _neighborhood_to_feature(n: DNeighborhood) -> dict:
         "name": n.name,
         "city": n.city,
     }
-    # geometry is stored inside props["geometry"] in our current model convention
-    if isinstance(n.props, dict):
+    # A geometria canônica não é misturada com metadados legados.
+    geom = getattr(n, "geometry", None)
+    if hasattr(geom, "geojson"):
+        import json
+        geom = json.loads(geom.geojson)
+    if geom is None and isinstance(n.props, dict):
         geom = n.props.get("geometry")
         # Merge remaining props, without overriding core fields
         for k, v in n.props.items():

@@ -86,6 +86,7 @@ def _resolve_phase_video(
     manifest_path: Path,
     phase: dict[str, Any],
     video_resolver: VideoResolver | None,
+    require_uploader: bool = False,
 ) -> Path:
     file_value = phase.get("file")
     attachment_key = phase.get("video_attachment_key")
@@ -101,6 +102,10 @@ def _resolve_phase_video(
         )
 
     if file_value is not None:
+        if require_uploader:
+            raise DemoManifestError(
+                "A demonstração operacional aceita somente vídeos do uploader; remova 'file'"
+            )
         return _safe_asset_path(manifest_path.parent, file_value)
 
     if video_resolver is None:
@@ -132,6 +137,7 @@ def load_scenario(
     path: str | Path,
     *,
     video_resolver: VideoResolver | None = None,
+    require_uploader: bool = False,
 ) -> DemoScenario:
     manifest_path = Path(path)
     if not manifest_path.is_file():
@@ -182,7 +188,10 @@ def load_scenario(
             DemoPhase(
                 name=name.strip(),
                 file_path=_resolve_phase_video(
-                    manifest_path, phase, video_resolver
+                    manifest_path,
+                    phase,
+                    video_resolver,
+                    require_uploader=require_uploader,
                 ),
                 label=str(label),
                 duration_seconds=duration,
