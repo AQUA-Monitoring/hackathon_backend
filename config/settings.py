@@ -71,6 +71,7 @@ CORS_ALLOWED_ORIGINS = [
 
 INSTALLED_APPS = [
     "django.contrib.gis",
+    "core.flood_impact",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
