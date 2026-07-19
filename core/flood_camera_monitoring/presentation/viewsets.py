@@ -2,6 +2,8 @@ from datetime import timedelta
 import unicodedata
 from uuid import UUID
 
+from django.contrib.gis.geos import Point
+from django.contrib.gis.measure import D
 from django.db import connections, transaction
 from django.db.models import Case, IntegerField, Q, Value, When
 from django.utils import timezone
@@ -591,7 +593,7 @@ class CameraMetadataViewSet(SafeOrderingMixin, viewsets.ViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        if selected_street and not address_reference:
+        if selected_street and (not address_reference or street_id):
             linked_neighborhoods = selected_street.neighborhood_links.all()
             if linked_neighborhoods.exists() and not linked_neighborhoods.filter(
                 neighborhood=neighborhood
@@ -633,6 +635,29 @@ class CameraMetadataViewSet(SafeOrderingMixin, viewsets.ViewSet):
                     "address": {
                         "coordinates": [
                             "[0,0] não representa uma localização operacional resolvida."
+                        ]
+                    }
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if address_reference and not AddressReference.objects.filter(
+            pk=address_reference.pk,
+            location__distance_lte=(
+                Point(longitude, latitude, srid=4326),
+                D(
+                    m=getattr(
+                        settings,
+                        "ADDRESS_REFERENCE_COORDINATE_TOLERANCE_METERS",
+                        5,
+                    )
+                ),
+            ),
+        ).exists():
+            return Response(
+                {
+                    "address": {
+                        "address_reference_id": [
+                            "As coordenadas não correspondem à referência de endereço selecionada."
                         ]
                     }
                 },

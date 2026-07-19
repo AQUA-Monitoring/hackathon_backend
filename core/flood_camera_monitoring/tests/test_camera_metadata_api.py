@@ -163,6 +163,23 @@ class CameraMetadataApiTests(APITestCase):
             response.data["address"]["address_reference_id"], str(reference.id)
         )
 
+        mismatched = self.camera_payload(
+            hls="https://cameras.example/canonical-mismatched.m3u8"
+        )
+        mismatched["address"].update(
+            {
+                "street_id": str(street.id),
+                "address_reference_id": str(reference.id),
+                "latitude": -26.295,
+                "longitude": -48.863,
+            }
+        )
+        rejected = self.client.post(
+            "/api/flood_monitoring/cameras/", mismatched, format="json"
+        )
+        self.assertEqual(rejected.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("address_reference_id", rejected.data["address"])
+
     def test_camera_rejects_inconsistent_street_and_address_reference(self):
         dataset = GeodataDataset.objects.create(
             city=self.city,
@@ -273,6 +290,36 @@ class CameraMetadataApiTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data["address"]["street_id"], str(selected_axis.id))
+
+        other_neighborhood = Neighborhood.objects.create(
+            name="Outro bairro",
+            city=self.city.name,
+            city_ref=self.city,
+        )
+        wrong_axis = Street.objects.create(
+            city=self.city,
+            dataset=dataset,
+            source_record_id="street-wrong-neighborhood-axis",
+            name="Rua Canônica",
+            normalized_name="rua canonica",
+        )
+        StreetNeighborhood.objects.create(
+            street=wrong_axis, neighborhood=other_neighborhood
+        )
+        wrong_payload = self.camera_payload(
+            hls="https://cameras.example/wrong-neighborhood-axis.m3u8"
+        )
+        wrong_payload["address"].update(
+            {
+                "street_id": str(wrong_axis.id),
+                "address_reference_id": str(reference.id),
+            }
+        )
+        rejected = self.client.post(
+            "/api/flood_monitoring/cameras/", wrong_payload, format="json"
+        )
+        self.assertEqual(rejected.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("street_id", rejected.data["address"])
 
     def test_creation_requires_admin_and_rejects_client_audit_fields(self):
         response = self.client.post(

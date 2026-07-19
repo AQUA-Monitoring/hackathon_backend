@@ -429,7 +429,10 @@ class AddressingViewSet(viewsets.ViewSet):
         if street:
             # Referências CNEFE podem apontar para outro segmento físico com o
             # mesmo nome; filtre pela identidade do logradouro.
-            qs = qs.filter(street_name__iexact=street.name)
+            qs = qs.filter(
+                Q(street__normalized_name=street.normalized_name)
+                | Q(street_name__iexact=street.name)
+            )
         qs = qs.filter(
             Q(street_name__istartswith=query)
             | Q(number__istartswith=query)

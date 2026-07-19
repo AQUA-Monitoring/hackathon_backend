@@ -60,3 +60,8 @@ conflitos. Repetir o mesmo arquivo e autoridade retorna `idempotent=true`.
 - Regiões não foram inferidas.
 - Nenhum endereço operacional de câmera foi sobrescrito pela carga.
 - Produção não foi alterada.
+
+Ao cadastrar uma câmera com `address_reference_id`, as coordenadas submetidas
+devem ficar a no máximo 5 m do ponto CNEFE selecionado. O limite pode ser
+calibrado por ambiente com `ADDRESS_REFERENCE_COORDINATE_TOLERANCE_METERS`;
+alterações manuais no formulário devem remover a referência antes do envio.
