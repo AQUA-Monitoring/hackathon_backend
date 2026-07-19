@@ -1,399 +1,366 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 import logging
 import os
 import time
-from django.db import transaction
-from django.core.files.base import ContentFile
+from typing import Any, Callable
 
-from core.flood_camera_monitoring.application.dto.predict_response import (
-    PredictResponse,
-)
-from core.flood_camera_monitoring.infra.models import Camera, FloodDetectionRecord
+from django.core.files.base import ContentFile
+from django.db import transaction
+
 from core.flood_camera_monitoring.adapters.gateways.opencv_stream_adapter import (
     OpenCVVideoStream,
 )
-from core.flood_camera_monitoring.infra.torch_flood_classifier import (
-    build_default_classifier,
+from core.flood_camera_monitoring.adapters.gateways.torch_classifier_adapter import (
+    TorchFloodClassifier,
 )
+from core.flood_camera_monitoring.application.operational_snapshot import (
+    begin_analysis,
+    begin_capture,
+    get_or_create_operational_snapshot,
+    mark_available,
+    mark_error,
+    mark_model_unavailable,
+    mark_no_frame,
+    mark_stream_online,
+    snapshot_prediction_payload,
+)
+from core.flood_camera_monitoring.application.utils.evaluation import (
+    EvalConfig,
+    aggregate_predictions,
+)
+from core.flood_camera_monitoring.application.utils.model_artifact import (
+    ModelArtifactInfo,
+    inspect_model_artifact,
+)
+from core.flood_camera_monitoring.infra.models import (
+    Camera,
+    CameraOperationalSnapshot,
+    FloodDetectionRecord,
+)
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
 class AnalyzeAllCamerasService:
-    """Service to analyze all ACTIVE cameras and persist flood events."""
+    """Atualiza snapshots e persiste somente indicações operacionais válidas."""
 
-    # Persist only when there's flood risk with flooded prob >= min_confidence
-    # Defaults can be overridden by environment variables
     min_confidence: float = float(os.getenv("FLOOD_MIN_CONFIDENCE", "10.0"))
-    # Additionally, persist when medium probability is high enough (e.g., 80%)
     medium_min_confidence: float = float(
         os.getenv("FLOOD_MEDIUM_MIN_CONFIDENCE", "80.0")
     )
     sample_frames: int = int(os.getenv("FLOOD_SAMPLE_FRAMES", "3"))
     sample_interval_ms: int = int(os.getenv("FLOOD_SAMPLE_INTERVAL_MS", "150"))
     warmup_drops: int = int(os.getenv("FLOOD_WARMUP_DROPS", "2"))
-
-    # Early-warning (medium) configuration
     strong_min: float = float(os.getenv("FLOOD_STRONG_MIN", "60.0"))
     medium_min: float = float(os.getenv("FLOOD_MEDIUM_MIN", "25.0"))
     medium_max: float = float(os.getenv("FLOOD_MEDIUM_MAX", "60.0"))
     trend_min_delta: float = float(os.getenv("FLOOD_TREND_MIN_DELTA", "10.0"))
     min_medium_frames: int = int(os.getenv("FLOOD_MIN_MEDIUM_FRAMES", "2"))
+    stream_factory: Callable[[str], Any] = OpenCVVideoStream
+    classifier_factory: Callable[[str], Any] = TorchFloodClassifier
+    artifact_inspector: Callable[[], ModelArtifactInfo] = inspect_model_artifact
 
     def run(self) -> int:
-        """
-        Backward-compatible entrypoint: run analysis and return only the count
-        of persisted records. Delegates to run_and_collect().
-        """
         _, saved = self.run_and_collect()
         return saved
 
-    def run_and_collect(self) -> tuple[list[dict], int]:
-        """
-        Analyze all ACTIVE cameras and persist alerts when criteria are met.
-        Returns (data, saved), where `data` is a list of per-camera results for
-        caching/inspection and `saved` is the number of DB records created.
-        """
-        logger = logging.getLogger(__name__)
+    def run_and_collect(self) -> tuple[list[dict[str, Any]], int]:
+        data: list[dict[str, Any]] = []
         saved = 0
-        rows = []  # collect per-câmera resultados para imprimir tabela ao final
-        data: list[dict] = []
-        clf = build_default_classifier()
+        classifier = None
+        classifier_resolved = False
+        classifier_error_code: str | None = None
+        artifact: ModelArtifactInfo | None = None
 
-        for cam in Camera.objects.filter(status=Camera.CameraStatus.ACTIVE).iterator():
-            # Escolhe a URL correta do stream; o campo antigo 'video_url' foi removido.
-            stream_url = getattr(cam, "video_hls", None)
-            # Pular câmeras de demonstração (loop) para não persistir registros
-            if isinstance(stream_url, str) and stream_url.startswith("loop:"):
+        cameras = Camera.objects.filter(status=Camera.CameraStatus.ACTIVE).iterator()
+        for camera in cameras:
+            stream_url = getattr(camera, "video_hls", None)
+            if self._is_demo_camera(camera, stream_url):
                 logger.info(
-                    "Skipping demo loop camera id=%s for persistence.",
-                    getattr(cam, "id", None),
+                    "Skipping demo camera id=%s in operational analysis.", camera.id
                 )
                 continue
+
+            snapshot = get_or_create_operational_snapshot(camera)
+            begin_capture(snapshot)
+
             if not stream_url:
-                logger.warning(
-                    "Camera id=%s não possui 'video_hls' configurado. Pulando.",
-                    getattr(cam, "id", None),
-                )
+                mark_no_frame(snapshot, error_code="STREAM_NOT_CONFIGURED")
+                data.append(snapshot_prediction_payload(camera, snapshot))
                 continue
-            stream = OpenCVVideoStream(stream_url)
-            frames: list[bytes] = []
-            try:
-                # Drop a few initial frames to reduce buffering artifacts
-                for _ in range(max(0, int(self.warmup_drops))):
-                    _ = stream.grab()
-                attempts = max(1, int(self.sample_frames))
-                for i in range(attempts):
-                    img_bytes = stream.grab()
-                    if img_bytes:
-                        frames.append(img_bytes)
-                    if i < attempts - 1 and self.sample_interval_ms > 0:
-                        time.sleep(self.sample_interval_ms / 1000.0)
-            except Exception as e:
-                logger.exception(
-                    "Failed to grab frames from camera id=%s: %s",
-                    getattr(cam, "id", None),
-                    e,
-                )
-            finally:
-                stream.close()
 
+            frames, capture_error = self._capture_frames(str(stream_url))
+            if capture_error:
+                mark_error(
+                    snapshot,
+                    error_code="STREAM_CAPTURE_ERROR",
+                    stream_unavailable=True,
+                )
+                data.append(snapshot_prediction_payload(camera, snapshot))
+                continue
             if not frames:
-                logger.warning(
-                    "No frame captured for camera id=%s. Skipping.",
-                    getattr(cam, "id", None),
-                )
+                mark_no_frame(snapshot)
+                data.append(snapshot_prediction_payload(camera, snapshot))
                 continue
 
-            # Predict for all captured frames and aggregate
-            assessments: list[PredictResponse] = []
-            best_idx = 0
-            best_flooded = -1.0
-            flooded_series: list[float] = []
-            for idx, fb in enumerate(frames):
-                a = clf.predict(fb)
-                assessments.append(a)
-                flooded = float(a.probabilities.flooded)
-                if flooded > best_flooded:
-                    best_flooded = flooded
-                    best_idx = idx
-                flooded_series.append(flooded)
-            # choose representative frame bytes to persist in records/logs
-            chosen_bytes = frames[best_idx] if frames else None
+            mark_stream_online(snapshot)
+            begin_analysis(snapshot, frames=len(frames))
 
-            mean_normal = sum(float(a.probabilities.normal) for a in assessments) / len(
-                assessments
-            )
-            mean_medium = sum(
-                float(getattr(a.probabilities, "medium", 0.0)) for a in assessments
-            ) / len(assessments)
-            mean_flooded = sum(
-                float(a.probabilities.flooded) for a in assessments
-            ) / len(assessments)
-            try:
-                mean_medium = sum(
-                    float(a.probabilities.medium) for a in assessments
-                ) / len(assessments)
-            except Exception:
-                mean_medium = 0.0
-            total = mean_normal + mean_flooded + mean_medium
-            if total > 0:
-                mean_normal = (mean_normal / total) * 100.0
-                mean_flooded = (mean_flooded / total) * 100.0
-                mean_medium = 100.0 - (mean_normal + mean_flooded)
-
-            # Decide triggers
-            decision_flooded = max(best_flooded, mean_flooded)
-            decision_medium = float(mean_medium)
-
-            # Compute early-warning (medium) indicators
-            strong = decision_flooded >= float(self.strong_min)
-            # rising trend if last increases sufficiently from first
-            rising_trend = False
-            if len(flooded_series) >= 2:
-                rising_trend = (flooded_series[-1] - flooded_series[0]) >= float(
-                    self.trend_min_delta
+            if artifact is None:
+                artifact = self.artifact_inspector()
+            if not artifact.available:
+                mark_model_unavailable(
+                    snapshot,
+                    fallback=False,
+                    model_version=None,
+                    error_code=artifact.error_code or "MODEL_UNAVAILABLE",
                 )
-            medium_band = (
-                float(self.medium_min) <= mean_flooded < float(self.medium_max)
-            )
-            medium_frames = sum(
-                1
-                for v in flooded_series
-                if float(self.medium_min) <= v < float(self.strong_min)
-            )
-            medium_condition = (not strong) and (
-                medium_band
-                or medium_frames >= int(self.min_medium_frames)
-                or (rising_trend and flooded_series[-1] >= float(self.medium_min))
-            )
+                data.append(snapshot_prediction_payload(camera, snapshot))
+                continue
 
-            if strong:
-                # Try creating with image; if fails (e.g., permission), save without image
+            if not classifier_resolved:
+                classifier_resolved = True
                 try:
-                    with transaction.atomic():
-                        FloodDetectionRecord.objects.create(
-                            camera=cam,
-                            # Business rule: mark as flooded when flooded prob crosses threshold
-                            is_flooded=True,
-                            medium=False,
-                            # Store the flooded probability used for the decision as confidence
-                            confidence=decision_flooded,
-                            prob_normal=mean_normal,
-                            prob_flooded=mean_flooded,
-                            prob_medium=mean_medium,
-                            # Save the exact frame used for the decision with a unique name
-                            image=(
-                                ContentFile(
-                                    chosen_bytes,
-                                    name=f"{cam.id}-{int(time.time())}.jpg",
-                                )
-                                if chosen_bytes
-                                else None
-                            ),
-                        )
-                except Exception as e:
-                    logger.warning(
-                        "Could not save image for camera id=%s (will save record without image): %s",
-                        getattr(cam, "id", None),
-                        e,
-                    )
-                    with transaction.atomic():
-                        FloodDetectionRecord.objects.create(
-                            camera=cam,
-                            is_flooded=True,
-                            medium=False,
-                            confidence=decision_flooded,
-                            prob_normal=mean_normal,
-                            prob_flooded=mean_flooded,
-                            prob_medium=mean_medium,
-                            image=None,
-                        )
-                saved += 1
-                status = "FLOOD_SAVE"
-                logger.info(
-                    (
-                        "Camera id=%s result: %s | best_flooded=%.2f | mean_flooded=%.2f | "
-                        "mean_normal=%.2f | mean_medium=%.2f | best_conf=%.2f | frames=%d | threshold=%.2f"
-                    ),
-                    getattr(cam, "id", None),
-                    status,
-                    best_flooded,
-                    mean_flooded,
-                    mean_normal,
-                    mean_medium,
-                    float(decision_flooded),
-                    len(assessments),
-                    float(self.strong_min),
-                )
-            elif medium_condition:
-                # Persist early-warning record (medium)
-                try:
-                    with transaction.atomic():
-                        FloodDetectionRecord.objects.create(
-                            camera=cam,
-                            is_flooded=False,
-                            medium=True,
-                            confidence=decision_flooded,
-                            prob_normal=mean_normal,
-                            prob_flooded=mean_flooded,
-                            prob_medium=mean_medium,
-                            image=(
-                                ContentFile(
-                                    chosen_bytes,
-                                    name=f"{cam.id}-{int(time.time())}.jpg",
-                                )
-                                if chosen_bytes
-                                else None
-                            ),
-                        )
-                except Exception as e:
-                    logger.warning(
-                        "Could not save image for camera id=%s (medium, saving without image): %s",
-                        getattr(cam, "id", None),
-                        e,
-                    )
-                    with transaction.atomic():
-                        FloodDetectionRecord.objects.create(
-                            camera=cam,
-                            is_flooded=False,
-                            medium=True,
-                            confidence=decision_flooded,
-                            prob_normal=mean_normal,
-                            prob_flooded=mean_flooded,
-                            prob_medium=mean_medium,
-                            image=None,
-                        )
-                saved += 1
-                status = "MEDIUM_SAVE"
-                logger.info(
-                    (
-                        "Camera id=%s result: %s | best_flooded=%.2f | mean_flooded=%.2f | "
-                        "mean_normal=%.2f | mean_medium=%.2f | frames=%d | criteria={band:%s,count:%d,trend:%s}"
-                    ),
-                    getattr(cam, "id", None),
-                    status,
-                    best_flooded,
-                    mean_flooded,
-                    mean_normal,
-                    mean_medium,
-                    len(assessments),
-                    str(medium_band),
-                    medium_frames,
-                    str(rising_trend),
-                )
-            else:
-                status = "NO_FLOOD"
-                logger.info(
-                    (
-                        "Camera id=%s result: %s | best_flooded=%.2f | mean_flooded=%.2f | "
-                        "mean_normal=%.2f | mean_medium=%.2f | best_conf=%.2f | frames=%d | threshold=%.2f"
-                    ),
-                    getattr(cam, "id", None),
-                    status,
-                    best_flooded,
-                    mean_flooded,
-                    mean_normal,
-                    mean_medium,
-                    float(decision_flooded),
-                    len(assessments),
-                    float(self.strong_min),
-                )
+                    classifier = self.classifier_factory(str(artifact.path))
+                except Exception:
+                    classifier_error_code = "MODEL_LOAD_FAILED"
+                    logger.exception("Could not initialize the operational classifier")
 
-            camera_label = f"({getattr(cam, 'description', '')})".strip()
-            # Keep row length aligned with headers below (7 columns)
-            rows.append(
-                (
-                    camera_label,
-                    getattr(cam, "video_hls", ""),
-                    status,
-                    f"{float(max(decision_flooded, decision_medium)):.2f}",
-                    f"{mean_normal:.2f}",
-                    f"{mean_flooded:.2f}",
-                    f"{mean_medium:.2f}",
+            if classifier is None:
+                mark_model_unavailable(
+                    snapshot,
+                    fallback=False,
+                    model_version=artifact.version,
+                    error_code=classifier_error_code or "MODEL_UNAVAILABLE",
                 )
-            )
+                data.append(snapshot_prediction_payload(camera, snapshot))
+                continue
 
-            # Append structured result for this camera
+            if bool(getattr(classifier, "_fallback", False)):
+                mark_model_unavailable(
+                    snapshot,
+                    fallback=True,
+                    model_version=artifact.version,
+                    error_code="MODEL_FALLBACK",
+                )
+                data.append(snapshot_prediction_payload(camera, snapshot))
+                continue
+
             try:
-                data.append(
-                    {
-                        "camera": {
-                            "id": str(getattr(cam, "id", "")),
-                            "description": getattr(cam, "description", ""),
-                            "video_hls": getattr(cam, "video_hls", ""),
-                        },
-                        "status": status,
-                        "is_flooded": bool(strong),
-                        "medium": bool(medium_condition and not strong),
-                        "confidence": float(max(decision_flooded, decision_medium)),
-                        "probabilities": {
-                            "normal": float(mean_normal),
-                            "flooded": float(mean_flooded),
-                            "medium": float(mean_medium),
-                        },
-                    }
-                )
+                summary, _ = aggregate_predictions(frames, classifier, self._eval_config())
             except Exception:
-                # best-effort: ignore data collection errors
-                pass
+                logger.exception("Inference failed for camera id=%s", camera.id)
+                mark_error(
+                    snapshot,
+                    error_code="INFERENCE_ERROR",
+                    model_status=CameraOperationalSnapshot.ModelStatus.READY,
+                    model_version=artifact.version,
+                )
+                data.append(snapshot_prediction_payload(camera, snapshot))
+                continue
 
-        # Imprime uma tabela de resumo ao final
-        try:
-            table = self._format_table(
-                [
-                    "Câmera",
-                    "Endereço",
-                    "Status",
-                    "Conf(%)",
-                    "Normal(%)",
-                    "Alagado(%)",
-                    "Médio(%)",
-                ],
-                rows,
-                max_widths={"Endereço": 70},
+            classification = self._classification(summary)
+            confidence = self._classification_confidence(summary, classification)
+            mark_available(
+                snapshot,
+                classification=classification,
+                prob_normal=float(summary["mean_normal"]),
+                prob_medium=float(summary["mean_medium"]),
+                prob_flooded=float(summary["mean_flooded"]),
+                confidence=confidence,
+                frames=int(summary["frames_count"]),
+                model_version=artifact.version or "unknown",
             )
-            logger.info("Resumo da análise (salvos=%s):\n%s", saved, table)
-        except Exception:
-            logger.exception("Falha ao montar tabela de resumo")
 
+            if classification in {
+                CameraOperationalSnapshot.CameraClassification.FLOOD_INDICATION,
+                CameraOperationalSnapshot.CameraClassification.INTERMEDIATE_INDICATION,
+            }:
+                if self._persist_detection(camera, frames, summary, classification):
+                    saved += 1
+
+            data.append(snapshot_prediction_payload(camera, snapshot))
+
+        logger.info(
+            "Operational camera analysis finished: snapshots=%s persisted=%s",
+            len(data),
+            saved,
+        )
         return data, saved
+
+    def _capture_frames(self, stream_url: str) -> tuple[list[bytes], bool]:
+        stream = None
+        frames: list[bytes] = []
+        try:
+            stream = self.stream_factory(stream_url)
+            for _ in range(max(0, int(self.warmup_drops))):
+                stream.grab()
+            attempts = max(1, int(self.sample_frames))
+            for index in range(attempts):
+                frame = stream.grab()
+                if frame:
+                    frames.append(frame)
+                if index < attempts - 1 and self.sample_interval_ms > 0:
+                    time.sleep(self.sample_interval_ms / 1000.0)
+        except Exception:
+            logger.exception("Could not capture frames from an operational camera")
+            return [], True
+        finally:
+            if stream is not None:
+                try:
+                    stream.close()
+                except Exception:
+                    logger.warning("Could not close an operational stream", exc_info=True)
+        return frames, False
+
+    def _eval_config(self) -> EvalConfig:
+        return EvalConfig(
+            sample_frames=self.sample_frames,
+            sample_interval_ms=self.sample_interval_ms,
+            warmup_drops=self.warmup_drops,
+            strong_min=self.strong_min,
+            medium_min=self.medium_min,
+            medium_max=self.medium_max,
+            trend_min_delta=self.trend_min_delta,
+            min_medium_frames=self.min_medium_frames,
+        )
+
+    @staticmethod
+    def _classification(summary: dict[str, Any]) -> str:
+        if bool(summary.get("strong")):
+            return CameraOperationalSnapshot.CameraClassification.FLOOD_INDICATION
+        if bool(summary.get("medium_flag")):
+            return (
+                CameraOperationalSnapshot.CameraClassification.INTERMEDIATE_INDICATION
+            )
+        return CameraOperationalSnapshot.CameraClassification.NO_INDICATION
+
+    @staticmethod
+    def _classification_confidence(
+        summary: dict[str, Any], classification: str
+    ) -> float:
+        if (
+            classification
+            == CameraOperationalSnapshot.CameraClassification.FLOOD_INDICATION
+        ):
+            value = summary.get("decision_flooded", summary.get("mean_flooded", 0.0))
+        elif (
+            classification
+            == CameraOperationalSnapshot.CameraClassification.INTERMEDIATE_INDICATION
+        ):
+            value = max(
+                float(summary.get("mean_medium", 0.0)),
+                float(summary.get("mean_flooded", 0.0)),
+            )
+        else:
+            value = summary.get("mean_normal", 0.0)
+        return max(0.0, min(100.0, float(value)))
+
+    @staticmethod
+    def _is_demo_camera(camera, stream_url: Any) -> bool:
+        if isinstance(stream_url, str) and stream_url.startswith("loop:"):
+            return True
+        for attr in ("source_scope", "source_kind"):
+            if str(getattr(camera, attr, "")).upper() == "DEMO":
+                return True
+        return False
+
+    @staticmethod
+    def _persist_detection(
+        camera,
+        frames: list[bytes],
+        summary: dict[str, Any],
+        classification: str,
+    ) -> bool:
+        is_flooded = (
+            classification
+            == CameraOperationalSnapshot.CameraClassification.FLOOD_INDICATION
+        )
+        is_medium = (
+            classification
+            == CameraOperationalSnapshot.CameraClassification.INTERMEDIATE_INDICATION
+        )
+        confidence = float(summary.get("decision_flooded", 0.0))
+        chosen_bytes = summary.get("chosen_bytes") or (frames[0] if frames else None)
+        values = {
+            "camera": camera,
+            "is_flooded": is_flooded,
+            "medium": is_medium,
+            "confidence": confidence,
+            "prob_normal": float(summary["mean_normal"]),
+            "prob_flooded": float(summary["mean_flooded"]),
+            "prob_medium": float(summary["mean_medium"]),
+        }
+        try:
+            with transaction.atomic():
+                FloodDetectionRecord.objects.create(
+                    **values,
+                    image=(
+                        ContentFile(
+                            chosen_bytes,
+                            name=f"{camera.id}-{int(time.time())}.jpg",
+                        )
+                        if chosen_bytes
+                        else None
+                    ),
+                )
+            return True
+        except Exception:
+            logger.warning(
+                "Could not persist detection image for camera id=%s; retrying without image",
+                camera.id,
+                exc_info=True,
+            )
+        try:
+            with transaction.atomic():
+                FloodDetectionRecord.objects.create(**values, image=None)
+            return True
+        except Exception:
+            logger.exception("Could not persist detection for camera id=%s", camera.id)
+            return False
 
     @staticmethod
     def _format_table(headers, rows, max_widths=None) -> str:
-        """Gera uma tabela ASCII simples.
-        max_widths: dict opcional com largura máxima por coluna (pelo header)
-        """
+        """Compatibilidade com consumidores antigos do formatador de logs."""
         max_widths = max_widths or {}
         headers = list(headers or [])
         if not headers:
             return ""
-
-        # Calcula larguras com segurança para linhas menores/maiores que headers
-        widths = [len(str(h)) for h in headers]
-        for r in rows:
-            cols = min(len(headers), len(r))
-            for i in range(cols):
-                cell_str = str(r[i])
-                col_name = headers[i] if i < len(headers) else None
-                limit = max_widths.get(col_name, None) if col_name is not None else None
-                if limit and len(cell_str) > limit:
-                    cell_str = cell_str[: max(0, limit - 1)] + "…"
-                widths[i] = max(widths[i], len(cell_str))
-
-        def fmt_row(vals):
-            out = []
-            cols = min(len(headers), len(vals))
-            for i in range(cols):
-                s = str(vals[i])
-                col_name = headers[i] if i < len(headers) else None
-                limit = max_widths.get(col_name, None) if col_name is not None else None
-                if limit and len(s) > limit:
-                    s = s[: max(0, limit - 1)] + "…"
-                out.append(s.ljust(widths[i]))
-            return " | ".join(out)
-
-        sep = "-+-".join("-" * w for w in widths)
-        lines = [fmt_row(headers), sep]
-        for r in rows:
-            lines.append(fmt_row(r))
+        widths = [len(str(header)) for header in headers]
+        normalized_rows = []
+        for row in rows:
+            normalized = []
+            for index, header in enumerate(headers):
+                value = str(row[index]) if index < len(row) else ""
+                limit = max_widths.get(header)
+                if limit and len(value) > limit:
+                    value = value[: max(0, limit - 1)] + "…"
+                normalized.append(value)
+                widths[index] = max(widths[index], len(value))
+            normalized_rows.append(normalized)
+        rule = "+" + "+".join("-" * (width + 2) for width in widths) + "+"
+        lines = [rule]
+        lines.append(
+            "|"
+            + "|".join(
+                f" {str(value):<{widths[index]}} "
+                for index, value in enumerate(headers)
+            )
+            + "|"
+        )
+        lines.append(rule)
+        for row in normalized_rows:
+            lines.append(
+                "|"
+                + "|".join(
+                    f" {value:<{widths[index]}} "
+                    for index, value in enumerate(row)
+                )
+                + "|"
+            )
+        lines.append(rule)
         return "\n".join(lines)

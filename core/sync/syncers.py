@@ -6,7 +6,7 @@ from uuid import UUID
 from django.core.files.base import ContentFile
 from django.utils.dateparse import parse_date, parse_datetime
 
-from core.addressing.infra.models import City, Neighborhood, Region
+from core.addressing.models import City, Neighborhood, Region
 from core.blog.infra.models import Post
 from core.flood_camera_monitoring.infra.models import Camera
 from core.flood_point_registering.infra.models import Flood_Point_Register

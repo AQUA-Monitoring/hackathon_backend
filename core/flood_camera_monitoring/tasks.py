@@ -7,7 +7,7 @@ from django.conf import settings
 
 @shared_task
 def refresh_all_and_cache_task() -> int:
-    """Compute once via analyze service, persist alerts, and cache list for API."""
+    """Atualiza snapshots, persiste indicações e publica a projeção no cache."""
     from core.flood_camera_monitoring.application.use_cases.analyze_all_cameras import (
         AnalyzeAllCamerasService,
     )

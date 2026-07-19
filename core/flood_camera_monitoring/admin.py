@@ -1,5 +1,9 @@
 from django.contrib import admin
-from core.flood_camera_monitoring.infra.models import Camera, FloodDetectionRecord
+from core.flood_camera_monitoring.infra.models import (
+    Camera,
+    CameraOperationalSnapshot,
+    FloodDetectionRecord,
+)
 
 
 @admin.register(Camera)
@@ -8,6 +12,8 @@ class CameraAdmin(admin.ModelAdmin):
         "id",
         "status",
         "description",
+        "address",
+        "created_by",
         "video_hls",
         "video_embed",
         "neighborhood",
@@ -23,8 +29,9 @@ class CameraAdmin(admin.ModelAdmin):
         "description",
         "neighborhood__name",
     )
-    autocomplete_fields = ("neighborhood",)
-    list_select_related = ("neighborhood",)
+    autocomplete_fields = ("address", "neighborhood")
+    raw_id_fields = ("created_by",)
+    list_select_related = ("address", "created_by", "neighborhood")
     list_per_page = 25
 
 
@@ -49,3 +56,19 @@ class FloodDetectionRecordAdmin(admin.ModelAdmin):
     @admin.display(ordering="camera__description", description="Câmera")
     def camera_description(self, obj):
         return getattr(obj.camera, "description", "")
+
+
+@admin.register(CameraOperationalSnapshot)
+class CameraOperationalSnapshotAdmin(admin.ModelAdmin):
+    list_display = (
+        "camera",
+        "stream_status",
+        "analysis_status",
+        "classification",
+        "model_status",
+        "analyzed_at",
+        "updated_at",
+    )
+    list_filter = ("stream_status", "analysis_status", "classification", "model_status")
+    search_fields = ("camera__id", "camera__description", "model_version", "error_code")
+    list_select_related = ("camera",)

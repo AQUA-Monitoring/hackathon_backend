@@ -31,5 +31,8 @@ class IsAppAdmin(BasePermission):
         return bool(
             user
             and getattr(user, "is_authenticated", False)
-            and getattr(user, "type", None) == User.UserType.ADMIN
+            and (
+                getattr(user, "type", None) == User.UserType.ADMIN
+                or getattr(user, "is_staff", False)
+            )
         )

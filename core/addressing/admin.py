@@ -1,5 +1,5 @@
 from django.contrib import admin
-from core.addressing.infra.models import Address, Neighborhood, Region, City
+from core.addressing.models import Address, AddressReference, GeodataDataset, Neighborhood, Region, City, Street
 
 
 @admin.register(Address)
@@ -9,6 +9,7 @@ class AddressAdmin(admin.ModelAdmin):
         "street",
         "number",
         "city",
+        "city_ref",
         "state",
         "country",
         "zipcode",
@@ -17,25 +18,56 @@ class AddressAdmin(admin.ModelAdmin):
     search_fields = ("street", "city", "zipcode")
     list_filter = ("city", "state", "country")
     list_per_page = 25
-    autocomplete_fields = ("neighborhood",)
+    autocomplete_fields = ("city_ref", "neighborhood", "street_ref", "address_reference")
 
 
 @admin.register(Neighborhood)
 class NeighborhoodAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "city", "region", "updated_at")
-    search_fields = ("name", "city")
-    list_filter = ("city", "region")
+    list_display = ("id", "name", "official_code", "city", "region", "is_active", "updated_at")
+    search_fields = ("name", "normalized_name", "official_code", "city")
+    list_filter = ("city", "region", "is_active")
     autocomplete_fields = ("region",)
 
 
 @admin.register(Region)
 class RegionAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "city", "updated_at")
-    search_fields = ("name", "city")
-    list_filter = ("city",)
+    list_display = ("id", "name", "official_code", "city", "is_active", "updated_at")
+    search_fields = ("name", "normalized_name", "official_code", "city")
+    list_filter = ("city", "is_active")
 
 
 @admin.register(City)
 class CityAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "created_at", "updated_at")
-    search_fields = ("name",)
+    list_display = ("id", "name", "official_code", "is_active", "created_at", "updated_at")
+    search_fields = ("name", "normalized_name", "official_code")
+    list_filter = ("is_active",)
+
+
+@admin.register(GeodataDataset)
+class GeodataDatasetAdmin(admin.ModelAdmin):
+    list_display = ("title", "city", "kind", "authority", "source_version", "status", "retrieved_at")
+    list_filter = ("city", "kind", "status", "authority")
+    search_fields = ("title", "authority", "sha256")
+
+
+@admin.register(Street)
+class StreetAdmin(admin.ModelAdmin):
+    list_display = ("name", "official_code", "city", "source_record_id", "is_active")
+    list_filter = ("city", "is_active")
+    search_fields = ("name", "source_name", "normalized_name", "official_code", "source_record_id")
+
+    def get_queryset(self, request):
+        queryset = super().get_queryset(request)
+        # O catálogo operacional deve mostrar somente ruas ativas por padrão.
+        # O filtro "Ativo" continua permitindo consultar as cópias inativas
+        # preservadas para auditoria.
+        if "is_active" not in request.GET:
+            queryset = queryset.filter(is_active=True)
+        return queryset
+
+
+@admin.register(AddressReference)
+class AddressReferenceAdmin(admin.ModelAdmin):
+    list_display = ("street_name", "number", "modifier", "address_type", "species", "city", "zipcode", "is_active")
+    list_filter = ("city", "address_type", "species", "is_active")
+    search_fields = ("street_name", "number", "modifier", "zipcode", "source_record_id")

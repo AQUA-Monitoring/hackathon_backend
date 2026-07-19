@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+from unittest.mock import Mock, patch
 
 from core.flood_camera_monitoring.demo.manifest import (
     DemoManifestError,
@@ -82,3 +83,53 @@ class DemoManifestTests(TestCase):
 
             self.assertEqual(scenario.available_states, ("auto", "flooded"))
             self.assertEqual(scenario.phase_for_sequence("auto", 0).label, "flooded")
+
+    def test_resolves_an_uploader_video_from_an_environment_key(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = self._write_scenario(root)
+            payload = json.loads(path.read_text())
+            payload["phases"] = payload["phases"][1:]
+            payload["phases"][0].pop("file")
+            payload["phases"][0]["video_attachment_key_env"] = (
+                "DEMO_VIDEO_ATTACHMENT_KEY"
+            )
+            path.write_text(json.dumps(payload))
+            resolved_video = root / "materialized.mp4"
+            resolved_video.touch()
+            resolver = Mock(return_value=resolved_video)
+
+            with patch.dict(
+                "os.environ",
+                {"DEMO_VIDEO_ATTACHMENT_KEY": "a9417b87-8b8b-4278-a154-f3f4333e5797"},
+            ):
+                scenario = load_scenario(path, video_resolver=resolver)
+
+            resolver.assert_called_once_with(
+                "a9417b87-8b8b-4278-a154-f3f4333e5797"
+            )
+            self.assertEqual(scenario.phases[0].file_path, resolved_video)
+
+    def test_requires_the_configured_uploader_environment_key(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = self._write_scenario(root)
+            payload = json.loads(path.read_text())
+            payload["phases"] = payload["phases"][1:]
+            payload["phases"][0].pop("file")
+            payload["phases"][0]["video_attachment_key_env"] = (
+                "DEMO_VIDEO_ATTACHMENT_KEY"
+            )
+            path.write_text(json.dumps(payload))
+
+            with (
+                patch.dict("os.environ", {}, clear=True),
+                self.assertRaisesRegex(DemoManifestError, "is not configured"),
+            ):
+                load_scenario(path, video_resolver=Mock())
+
+    def test_operational_manifest_rejects_local_files(self):
+        with TemporaryDirectory() as directory:
+            path = self._write_scenario(Path(directory))
+            with self.assertRaisesRegex(DemoManifestError, "somente vídeos do uploader"):
+                load_scenario(path, require_uploader=True)

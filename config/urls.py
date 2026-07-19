@@ -20,10 +20,10 @@ from django.urls import path, include
 from django.conf import settings
 
 from rest_framework.routers import DefaultRouter
-from rest_framework_simplejwt.views import (
-    TokenRefreshView,
+from core.users.presentation.auth_views import (
+    AppTokenRefreshView,
+    EmailTokenObtainPairView,
 )
-from core.users.presentation.auth_views import EmailTokenObtainPairView, SyncTokenView
 from core.uploader.router import router as uploader_router
 from core.sync.export import ExportView
 from config.core_health import health
@@ -39,14 +39,16 @@ urlpatterns = [
     path(
         "api/auth/token/", EmailTokenObtainPairView.as_view(), name="token_obtain_pair"
     ),
-    path("api/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
-    path("api/sync/token/", SyncTokenView.as_view(), name="sync-token"),
+    path(
+        "api/auth/token/refresh/", AppTokenRefreshView.as_view(), name="token_refresh"
+    ),
     path("api/users/", include("core.users.presentation.urls")),
     path("api/weather/", include("core.weather.presentation.urls")),
     path("api/forecast/", include("core.forecast.presentation.urls")),
     path("api/occurrences/", include("core.occurrences.presentation.urls")),
     path("api/upload/", include(uploader_router.urls)),
     path("api/addressing/", include("core.addressing.presentation.urls")),
+    path("api/flood-impact/", include("core.flood_impact.urls")),
     path("api/donate/", include("core.donate.presentation.urls")),
     path(
         "api/floods_point/", include("core.flood_point_registering.presentation.urls")

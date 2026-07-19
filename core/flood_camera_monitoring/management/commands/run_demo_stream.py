@@ -5,6 +5,7 @@ import threading
 
 from django.core.management.base import BaseCommand, CommandError
 
+from core.flood_camera_monitoring.demo.assets import UploadedVideoResolver
 from core.flood_camera_monitoring.demo.controller import (
     DemoStreamController,
     DemoStreamError,
@@ -43,12 +44,17 @@ class Command(BaseCommand):
             "DEMO_STREAM_MEDIA_INTERNAL_BASE_URL", "http://demo-stream:8088"
         )
         try:
-            scenario = load_scenario(options["scenario"])
+            scenario = load_scenario(
+                options["scenario"],
+                video_resolver=UploadedVideoResolver(options["work_dir"]),
+                require_uploader=True,
+            )
             controller = DemoStreamController(
                 scenario,
                 options["work_dir"],
                 public_hls_url=public_url,
                 internal_base_url=internal_url,
+                source_type="uploader",
             )
             controller.initialize()
         except (DemoManifestError, DemoStreamError) as exc:
