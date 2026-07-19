@@ -8,7 +8,7 @@ from django.contrib.gis.geos import LineString, MultiLineString
 from django.db import transaction
 from django.utils import timezone
 
-from core.addressing.infra.models import GeodataDataset, RoadAxisSegment
+from core.addressing.models import GeodataDataset, RoadAxisSegment
 from core.flood_impact.models import (
     FloodSpatialEventRevision,
     RoadFloodImpact,

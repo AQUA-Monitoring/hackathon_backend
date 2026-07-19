@@ -16,9 +16,8 @@ from rest_framework.decorators import action
 from django.db.models import Q
 from uuid import UUID
 
-from core.addressing.application.services import build_neighborhoods_feature_collection
-from core.addressing.infra.repositories import DjangoNeighborhoodRepository
-from core.addressing.infra.models import AddressReference, City, GeodataDataset, Region, Neighborhood, RoadAxisSegment, Street
+from core.addressing.application.territory import TerritoryResolutionError, TerritoryResolver, parse_geometry
+from core.addressing.models import AddressReference, City, GeodataDataset, Region, Neighborhood, RoadAxisSegment, Street
 from core.addressing.geojson import feature_collection
 from core.users.infra.models import User
 from core.users.permissions import IsAppAdmin
@@ -32,7 +31,7 @@ class AddressingViewSet(viewsets.ViewSet):
         raise exceptions.PermissionDenied(payload)
 
     def get_permissions(self):
-        if self.action in {"resolve", "autocomplete"}:
+        if self.action in {"resolve", "resolve_area", "autocomplete"}:
             return [permissions.IsAuthenticated()]
         if self.action in {"address_references", "datasets", "reports", "snapshot", "import_dataset"}:
             return [IsAppAdmin()]
@@ -239,10 +238,12 @@ class AddressingViewSet(viewsets.ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        repo = DjangoNeighborhoodRepository()
-        collection = build_neighborhoods_feature_collection(
-            repo, all_flag=all_flag, city=city, region=region
-        )
+        neighborhoods = Neighborhood.objects.select_related("region", "city_ref")
+        if all_flag is not True and city:
+            neighborhoods = neighborhoods.filter(city__iexact=city)
+        if all_flag is not True and region:
+            neighborhoods = neighborhoods.filter(region__name__iexact=region)
+        collection = feature_collection(neighborhoods.iterator(), kind="neighborhood")
         return Response(collection, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["get"], url_path="territories")
@@ -258,9 +259,16 @@ class AddressingViewSet(viewsets.ViewSet):
         dataset_version = request.query_params.get("dataset_version")
         if city_id and not City.objects.filter(pk=city_id).exists():
             return self._error("invalid_filter", "city_id não encontrado.", fields={"city_id": ["Cidade não encontrada."]})
-        qs_city = City.objects.filter(pk=city_id) if city_id else City.objects.all()
-        qs_region = Region.objects.filter(city_ref_id=city_id) if city_id else Region.objects.all()
-        qs_nb = Neighborhood.objects.filter(city_ref_id=city_id) if city_id else Neighborhood.objects.all()
+        qs_city = City.objects.filter(is_active=True)
+        qs_region = Region.objects.filter(is_active=True)
+        qs_nb = Neighborhood.objects.filter(is_active=True)
+        if city_id:
+            qs_city = qs_city.filter(pk=city_id)
+            qs_region = qs_region.filter(city_ref_id=city_id)
+            qs_nb = qs_nb.filter(city_ref_id=city_id)
+        qs_city = qs_city.filter(geometry_dataset__status=GeodataDataset.Status.ACTIVE)
+        qs_region = qs_region.filter(dataset__status=GeodataDataset.Status.ACTIVE)
+        qs_nb = qs_nb.filter(dataset__status=GeodataDataset.Status.ACTIVE)
         if bbox:
             qs_city = qs_city.filter(geometry__intersects=bbox)
             qs_region = qs_region.filter(geometry__intersects=bbox)
@@ -534,6 +542,35 @@ class AddressingViewSet(viewsets.ViewSet):
             address_qs = address_qs.none()
         address = address_qs.annotate(distance=Distance("location", point)).order_by("distance").first()
         return Response({"crs": "EPSG:4326", "city": {"id": str(city_id), "name": neighborhood.city_ref.name if neighborhood and neighborhood.city_ref else city.name} if city_id else None, "neighborhood": {"id": str(neighborhood.id), "name": neighborhood.name} if neighborhood else None, "region": {"id": str(neighborhood.region_id), "name": neighborhood.region.name} if neighborhood and neighborhood.region_id else None, "nearest_address": {"id": str(address.id), "street": address.street_name, "number": address.number, "distance": address.distance.m, "match_type": "nearest"} if address else None})
+
+    @action(detail=False, methods=["post"], url_path="resolve-area")
+    def resolve_area(self, request):
+        """Resolve uma mancha sem consultar geocodificador ou fonte externa."""
+        try:
+            footprint = parse_geometry(
+                request.data.get("geometry", request.data.get("footprint")),
+                expected="MultiPolygon",
+            )
+            if footprint is None:
+                raise TerritoryResolutionError("invalid_geometry", "footprint é obrigatório.")
+            result = TerritoryResolver().resolve_footprint(footprint)
+        except TerritoryResolutionError as exc:
+            http_status = status.HTTP_409_CONFLICT if exc.code.startswith("territory_") else status.HTTP_422_UNPROCESSABLE_ENTITY
+            return self._error(exc.code, str(exc), http_status, fields={"footprint": [str(exc)]})
+        return Response({
+            "crs": "EPSG:4326",
+            "status": result.status,
+            "reason_codes": list(result.reason_codes),
+            "method": result.method,
+            "city": {"id": str(result.city.id), "name": result.city.name},
+            "region": ({"id": str(result.region.id), "name": result.region.name} if result.region else None),
+            "neighborhood": ({"id": str(result.neighborhood.id), "name": result.neighborhood.name} if result.neighborhood else None),
+            "neighborhoods": list(result.neighborhoods),
+            "representative_point": json.loads(footprint.point_on_surface.geojson),
+            "primary_street": None,
+            "primary_road_axis_segment": None,
+            "algorithm_version": "territorial-resolution-v1",
+        })
 
     @action(detail=False, methods=["post"], url_path="import-dataset")
     def import_dataset(self, request):

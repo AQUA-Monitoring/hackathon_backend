@@ -213,6 +213,7 @@ class CameraReadSerializer(serializers.Serializer):
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
     created_by = serializers.SerializerMethodField()
+    territorial_context = serializers.SerializerMethodField()
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
@@ -282,6 +283,18 @@ class CameraReadSerializer(serializers.Serializer):
         if camera.created_by_id is None:
             return None
         return {"id": str(camera.created_by_id)}
+
+    @staticmethod
+    def get_territorial_context(camera):
+        return {
+            "city_id": str(camera.city_id) if camera.city_id else None,
+            "region_id": str(camera.region_id) if camera.region_id else None,
+            "neighborhood_id": str(camera.neighborhood_id) if camera.neighborhood_id else None,
+            "street_id": str(camera.street_id) if camera.street_id else None,
+            "road_segment_id": str(camera.road_segment_id) if camera.road_segment_id else None,
+            "address_reference_id": str(camera.address_reference_id) if camera.address_reference_id else None,
+            "resolution": camera.territory_resolution or {},
+        }
 
     @staticmethod
     def get_preview_url(camera):

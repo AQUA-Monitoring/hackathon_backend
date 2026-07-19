@@ -1,9 +1,17 @@
 from django.utils import timezone
 from rest_framework import serializers
 from core.flood_point_registering.infra.models import Flood_Point_Register
-from core.addressing.infra.models import City, Neighborhood
-from django.db import models
+from core.addressing.models import City, Neighborhood
+from django.db import models, transaction
 from uuid import UUID
+import json
+
+from core.addressing.application.territory import (
+    TerritoryResolutionError,
+    TerritoryResolver,
+    parse_geometry,
+)
+from core.flood_point_registering.services import sync_legacy_spatial_event
 
 
 class FloodPointRegisterSerializer(serializers.ModelSerializer):
@@ -21,6 +29,10 @@ class FloodPointRegisterSerializer(serializers.ModelSerializer):
     )
     # Require props and validate as GeoJSON Feature
     props = serializers.JSONField()
+    location = serializers.JSONField(required=False, allow_null=True)
+    footprint = serializers.JSONField(required=False, allow_null=True)
+    territory_resolution = serializers.JSONField(read_only=True)
+    spatial_event_id = serializers.UUIDField(read_only=True)
 
     class Meta:
         model = Flood_Point_Register
@@ -34,8 +46,14 @@ class FloodPointRegisterSerializer(serializers.ModelSerializer):
             "created_at",
             "finished_at",
             "props",
+            "location",
+            "footprint",
+            "territory_resolution",
+            "spatial_event_id",
         ]
         extra_kwargs = {
+            "city": {"required": False},
+            "neighborhood": {"required": False},
             # props pode ser omitido/nulo; será padronizado para um Feature básico
             "props": {"required": False, "allow_null": True},
             # allow API to omit timestamps; we'll default them
@@ -151,4 +169,78 @@ class FloodPointRegisterSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"neighborhood": "neighborhood não pertence à cidade informada"}
                 )
+        try:
+            location = parse_geometry(attrs.get("location"), expected="Point")
+            footprint = parse_geometry(attrs.get("footprint"), expected="MultiPolygon")
+        except TerritoryResolutionError as exc:
+            raise serializers.ValidationError({"geometry": str(exc)}) from exc
+
+        # Compatibilidade: aceite o ponto GeoJSON historicamente armazenado em
+        # props, mas não altere o payload legado devolvido ao cliente.
+        if location is None:
+            props = attrs.get("props") or {}
+            raw_geometry = props.get("geometry") if isinstance(props, dict) else None
+            if isinstance(raw_geometry, dict) and raw_geometry.get("type") == "Point":
+                try:
+                    location = parse_geometry(raw_geometry, expected="Point")
+                except TerritoryResolutionError as exc:
+                    raise serializers.ValidationError({"props": str(exc)}) from exc
+
+        resolution = None
+        if location is not None or footprint is not None:
+            if location is not None and footprint is not None and not footprint.covers(location):
+                raise serializers.ValidationError(
+                    {"geometry": "o ponto representativo deve pertencer à mancha informada"}
+                )
+            try:
+                resolution = (
+                    TerritoryResolver().resolve_footprint(footprint)
+                    if footprint is not None
+                    else TerritoryResolver().resolve_point(location)
+                )
+            except TerritoryResolutionError as exc:
+                raise serializers.ValidationError({"geometry": str(exc)}) from exc
+            if city and city.pk != resolution.city.pk:
+                raise serializers.ValidationError({"city": "cidade incompatível com a geometria"})
+            if neighborhood and resolution.neighborhood and neighborhood.pk != resolution.neighborhood.pk:
+                raise serializers.ValidationError({"neighborhood": "bairro incompatível com a geometria"})
+            attrs.setdefault("city", resolution.city)
+            if resolution.neighborhood:
+                attrs.setdefault("neighborhood", resolution.neighborhood)
+            attrs["territory_resolution"] = {
+                "method": resolution.method,
+                "city_id": str(resolution.city.pk),
+                "region_id": str(resolution.region.pk) if resolution.region else None,
+                "neighborhood_id": str(resolution.neighborhood.pk) if resolution.neighborhood else None,
+            }
+        if not city and location is None and footprint is None:
+            raise serializers.ValidationError({"city": "cidade ou geometria é obrigatória"})
+        attrs["location"] = location
+        attrs["footprint"] = footprint
+        if not attrs.get("neighborhood"):
+            raise serializers.ValidationError(
+                {"neighborhood": "bairro informado ou resolvido pela geometria é obrigatório"}
+            )
         return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
+        instance = super().create(validated_data)
+        sync_legacy_spatial_event(
+            instance, author=getattr(self.context.get("request"), "user", None)
+        )
+        return instance
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        instance = super().update(instance, validated_data)
+        sync_legacy_spatial_event(
+            instance, author=getattr(self.context.get("request"), "user", None)
+        )
+        return instance
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["location"] = json.loads(instance.location.geojson) if instance.location else None
+        data["footprint"] = json.loads(instance.footprint.geojson) if instance.footprint else None
+        return data

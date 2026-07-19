@@ -11,7 +11,7 @@ from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
-from core.addressing.infra.models import City, GeodataDataset
+from core.addressing.models import City, GeodataDataset
 from core.flood_impact.models import FloodSpatialEvent, FloodSpatialEventRevision, RoadFloodImpact, RoadFloodImpactRun, RoadImpactHotspot
 from core.flood_impact.services import PostGISRoadImpactService
 from core.flood_camera_monitoring.application.nearby_cameras import camera_coordinates, haversine_distance_m

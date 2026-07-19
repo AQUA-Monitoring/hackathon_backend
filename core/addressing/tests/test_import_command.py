@@ -10,7 +10,7 @@ from django.utils import timezone
 
 from django.contrib.gis.geos import MultiPolygon, Polygon
 
-from core.addressing.infra.models import AddressReference, City, GeodataDataset, Neighborhood, RoadAxisSegment, Street, StreetNeighborhood
+from core.addressing.models import AddressReference, City, GeodataDataset, Neighborhood, RoadAxisSegment, Street, StreetNeighborhood
 from core.addressing.management.commands.import_addressing_dataset import chunked, geos_geometry, iter_source_features, source_street_name
 
 

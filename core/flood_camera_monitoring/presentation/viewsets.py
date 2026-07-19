@@ -25,7 +25,7 @@ from core.flood_camera_monitoring.presentation.serializers import (
 )
 from django.conf import settings
 from core.flood_camera_monitoring.presentation.utils import build_prediction_payload
-from core.addressing.infra.models import (
+from core.addressing.models import (
     Address,
     AddressReference,
     City,
@@ -38,6 +38,8 @@ from core.flood_camera_monitoring.application.nearby_cameras import (
     MissingCameraCoordinates,
     find_nearby_cameras,
 )
+from core.flood_camera_monitoring.application.territorial_context import apply_camera_territorial_context
+from core.addressing.application.territory import TerritoryResolutionError
 from core.flood_camera_monitoring.infra.models import (
     Camera,
     CameraOperationalSnapshot,
@@ -69,6 +71,11 @@ def _camera_metadata_queryset():
         "neighborhood__region",
         "operational_snapshot",
         "created_by",
+        "city",
+        "region",
+        "street",
+        "road_segment",
+        "address_reference",
     )
 
 
@@ -770,6 +777,22 @@ class CameraMetadataViewSet(SafeOrderingMixin, viewsets.ViewSet):
                 latitude=address.latitude,
                 longitude=address.longitude,
             )
+            try:
+                apply_camera_territorial_context(
+                    camera, latitude=address.latitude, longitude=address.longitude
+                )
+            except TerritoryResolutionError:
+                # A validação legada de cidade/bairro permanece válida mesmo
+                # quando a nova base territorial ainda não foi carregada.
+                camera.city = city
+                camera.region = neighborhood.region
+                camera.street = selected_street
+                camera.address_reference = address_reference
+                camera.territory_resolution = {"method": "LEGACY_ADDRESS", "resolved": False}
+            camera.save(update_fields=[
+                "city", "region", "neighborhood", "street", "road_segment",
+                "address_reference", "territory_resolution", "updated_at",
+            ])
             CameraOperationalSnapshot.objects.create(camera=camera)
 
         camera = _camera_metadata_queryset().get(pk=camera.pk)

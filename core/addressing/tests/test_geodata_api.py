@@ -8,7 +8,7 @@ from django.db import IntegrityError
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from core.addressing.infra.models import AddressReference, City, GeodataDataset, Neighborhood, Street, StreetNeighborhood
+from core.addressing.models import AddressReference, City, GeodataDataset, Neighborhood, Street, StreetNeighborhood
 
 
 class GeodataApiTests(TestCase):
@@ -182,6 +182,56 @@ class GeodataApiTests(TestCase):
         response = self.client.get("/api/addressing/resolve/", {"longitude": .5, "latitude": .5})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["neighborhood"]["name"], "Centro")
+
+    def test_resolve_area_requires_auth_and_returns_every_intersected_neighborhood(self):
+        boundary_dataset = GeodataDataset.objects.create(
+            city=self.city, kind="neighborhood_boundary", authority="Prefeitura",
+            title="Bairros", source_url="https://example.test/bairros",
+            license_name="Licença oficial", source_version="1",
+            retrieved_at=timezone.now(), sha256="9" * 64,
+            source_crs="EPSG:4326", status="active",
+        )
+        city_polygon = Polygon((
+            (-48.90, -26.40), (-48.70, -26.40), (-48.70, -26.20),
+            (-48.90, -26.20), (-48.90, -26.40),
+        ), srid=4326)
+        self.city.geometry = MultiPolygon(city_polygon, srid=4326)
+        self.city.save(update_fields=["geometry"])
+        for name, west, east in (("Oeste", -48.90, -48.80), ("Leste", -48.80, -48.70)):
+            Neighborhood.objects.create(
+                name=name, city=self.city.name, city_ref=self.city,
+                dataset=boundary_dataset, source_record_id=name.lower(),
+                geometry=MultiPolygon(Polygon((
+                    (west, -26.40), (east, -26.40), (east, -26.20),
+                    (west, -26.20), (west, -26.40),
+                ), srid=4326), srid=4326),
+            )
+        footprint = {
+            "type": "Polygon",
+            "coordinates": [[
+                [-48.82, -26.32], [-48.78, -26.32], [-48.78, -26.28],
+                [-48.82, -26.28], [-48.82, -26.32],
+            ]],
+        }
+        self.assertEqual(
+            self.client.post("/api/addressing/resolve-area/", {"geometry": footprint}, format="json").status_code,
+            401,
+        )
+        user = get_user_model().objects.create_user(
+            username="area-user", email="area@example.test", password="secret-test"
+        )
+        self.client.force_authenticate(user)
+        response = self.client.post(
+            "/api/addressing/resolve-area/", {"geometry": footprint}, format="json"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["status"], "VERIFIED")
+        self.assertEqual({item["name"] for item in response.data["neighborhoods"]}, {"Oeste", "Leste"})
+        self.assertAlmostEqual(
+            sum(item["footprint_fraction"] for item in response.data["neighborhoods"]),
+            1.0,
+            places=5,
+        )
 
     def test_streets_filters_and_geometry_is_opt_in(self):
         neighborhood_dataset = GeodataDataset.objects.create(city=self.city, kind="neighborhood_boundary", authority="Prefeitura", title="Bairros", source_url="https://example.test/bairros", license_name="Licença oficial", source_version="1", retrieved_at=timezone.now(), sha256="c" * 64, source_crs="EPSG:4326", status="active")

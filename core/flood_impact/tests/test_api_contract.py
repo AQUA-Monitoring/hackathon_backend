@@ -3,7 +3,7 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from core.addressing.infra.models import City
+from core.addressing.models import City
 from core.users.infra.models import User
 
 

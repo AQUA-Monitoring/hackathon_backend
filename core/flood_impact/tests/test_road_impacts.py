@@ -2,7 +2,7 @@ from django.contrib.gis.geos import LineString, MultiLineString, MultiPolygon, P
 from django.test import TestCase
 from django.utils import timezone
 
-from core.addressing.infra.models import City, GeodataDataset, RoadAxisSegment, Street
+from core.addressing.models import City, GeodataDataset, RoadAxisSegment, Street
 from core.flood_impact.models import FloodSpatialEvent, FloodSpatialEventRevision, RoadFloodImpact
 from core.flood_impact.services import PostGISRoadImpactService
 

@@ -41,6 +41,27 @@ class Camera(TimestampedModel):
         on_delete=models.PROTECT,
         related_name="registered_cameras",
     )
+    city = models.ForeignKey(
+        "addressing.City", null=True, blank=True, on_delete=models.PROTECT,
+        related_name="territorial_cameras",
+    )
+    region = models.ForeignKey(
+        "addressing.Region", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="territorial_cameras",
+    )
+    street = models.ForeignKey(
+        "addressing.Street", null=True, blank=True, on_delete=models.PROTECT,
+        related_name="territorial_cameras",
+    )
+    road_segment = models.ForeignKey(
+        "addressing.RoadAxisSegment", null=True, blank=True, on_delete=models.PROTECT,
+        related_name="territorial_cameras",
+    )
+    address_reference = models.ForeignKey(
+        "addressing.AddressReference", null=True, blank=True, on_delete=models.PROTECT,
+        related_name="territorial_cameras",
+    )
+    territory_resolution = models.JSONField(default=dict, blank=True)
 
     def __str__(self) -> str:  # pragma: no cover
         return f"Camera {self.id} ({self.get_status_display()})"

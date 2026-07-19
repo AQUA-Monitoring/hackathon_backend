@@ -17,7 +17,7 @@ from shapely.geometry import mapping, shape
 from shapely.validation import explain_validity, make_valid
 from shapely.ops import transform
 
-from core.addressing.infra.models import (
+from core.addressing.models import (
     AddressReference, City, GeodataDataset, Neighborhood, Region, RoadAxisSegment,
     RoadAxisSegmentNeighborhood, Street, StreetNeighborhood,
 )

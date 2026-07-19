@@ -1,5 +1,5 @@
 from django.contrib import admin
-from core.addressing.infra.models import Address, AddressReference, GeodataDataset, Neighborhood, Region, City, Street
+from core.addressing.models import Address, AddressReference, GeodataDataset, Neighborhood, Region, City, Street
 
 
 @admin.register(Address)

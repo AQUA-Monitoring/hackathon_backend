@@ -9,7 +9,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from core.addressing.infra.models import (
+from core.addressing.models import (
     AddressReference,
     City,
     GeodataDataset,

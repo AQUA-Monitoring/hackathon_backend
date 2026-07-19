@@ -12,6 +12,7 @@ class FloodSpatialEvent(TimestampedModel):
         CAMERA_OBSERVATION = "CAMERA_OBSERVATION", "Observação por câmera"
         USER_REPORT = "USER_REPORT", "Relato"
         CONFIRMED_OCCURRENCE = "CONFIRMED_OCCURRENCE", "Ocorrência confirmada"
+        LEGACY_UNCLASSIFIED = "LEGACY_UNCLASSIFIED", "Legado não classificado"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     city = models.ForeignKey("addressing.City", on_delete=models.PROTECT, related_name="flood_spatial_events")
@@ -21,6 +22,10 @@ class FloodSpatialEvent(TimestampedModel):
     current_revision = models.ForeignKey(
         "FloodSpatialEventRevision", null=True, blank=True, on_delete=models.PROTECT,
         related_name="current_for_events",
+    )
+    derived_from_event = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.PROTECT,
+        related_name="derived_events",
     )
 
     class Meta:

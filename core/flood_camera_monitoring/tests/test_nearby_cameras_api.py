@@ -3,7 +3,7 @@ from uuid import uuid4
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from core.addressing.infra.models import Address, City
+from core.addressing.models import Address, City
 from core.flood_camera_monitoring.infra.models import Camera
 
 

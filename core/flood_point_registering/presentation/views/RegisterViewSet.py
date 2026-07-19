@@ -1,6 +1,9 @@
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
+from rest_framework.permissions import SAFE_METHODS, AllowAny
+
+from core.users.permissions import IsAppAdmin
 from core.flood_point_registering.infra.models import Flood_Point_Register
 from core.flood_point_registering.presentation.serializers.RegisterSerializer import (
     FloodPointRegisterSerializer,
@@ -10,6 +13,11 @@ from core.flood_point_registering.presentation.serializers.RegisterSerializer im
 class FloodPointRegister(ModelViewSet):
     queryset = Flood_Point_Register.objects.all()
     serializer_class = FloodPointRegisterSerializer
+
+    def get_permissions(self):
+        if self.request.method in SAFE_METHODS:
+            return [AllowAny()]
+        return [IsAppAdmin()]
 
     def get_queryset(self):
         qs = Flood_Point_Register.objects.all()

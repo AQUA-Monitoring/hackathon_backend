@@ -1,5 +1,7 @@
 from django.contrib.gis.db import models
 from django.db.models import Q
+"""Modelos Django do catálogo territorial e de endereçamento."""
+
 import uuid
 
 from core.common.models import TimestampedModel
