@@ -20,14 +20,10 @@ from django.urls import path, include
 from django.conf import settings
 
 from rest_framework.routers import DefaultRouter
-<<<<<<< HEAD
-from core.users.presentation.auth_views import AppTokenRefreshView, EmailTokenObtainPairView
-=======
-from rest_framework_simplejwt.views import (
-    TokenRefreshView,
+from core.users.presentation.auth_views import (
+    AppTokenRefreshView,
+    EmailTokenObtainPairView,
 )
-from core.users.presentation.auth_views import EmailTokenObtainPairView, SyncTokenView
->>>>>>> dev
 from core.uploader.router import router as uploader_router
 from core.sync.export import ExportView
 from config.core_health import health
@@ -43,12 +39,9 @@ urlpatterns = [
     path(
         "api/auth/token/", EmailTokenObtainPairView.as_view(), name="token_obtain_pair"
     ),
-<<<<<<< HEAD
-    path("api/auth/token/refresh/", AppTokenRefreshView.as_view(), name="token_refresh"),
-=======
-    path("api/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
-    path("api/sync/token/", SyncTokenView.as_view(), name="sync-token"),
->>>>>>> dev
+    path(
+        "api/auth/token/refresh/", AppTokenRefreshView.as_view(), name="token_refresh"
+    ),
     path("api/users/", include("core.users.presentation.urls")),
     path("api/weather/", include("core.weather.presentation.urls")),
     path("api/forecast/", include("core.forecast.presentation.urls")),
