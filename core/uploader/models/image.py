@@ -1,4 +1,3 @@
-import mimetypes
 import uuid
 from pathlib import Path
 
@@ -6,10 +5,7 @@ from django.db import models
 
 
 def image_file_path(image, filename: str) -> str:
-    content_type = getattr(image.file, "content_type", None)
-    extension: str | None = mimetypes.guess_extension(content_type or "")
-    if not extension:
-        extension = Path(filename or getattr(image.file, "name", "")).suffix
+    extension = Path(filename or "").suffix.lower()
     if extension == ".jpe":
         extension = ".jpg"
     return f"images/{image.public_id}{extension or ''}"
@@ -39,5 +35,5 @@ class Image(models.Model):
         return f"{self.description} - {self.attachment_key}"
 
     @property
-    def url(self) -> str:
-        return self.file.url  # pylint: disable=no-member
+    def url(self) -> str | None:
+        return self.file.url if self.file else None  # pylint: disable=no-member

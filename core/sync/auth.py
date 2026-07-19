@@ -24,7 +24,5 @@ def login() -> str:
     if resp.status_code in {401, 403}:
         raise RuntimeError("Falha na autenticação remota: credenciais inválidas")
     if resp.status_code != 200:
-        raise RuntimeError(
-            f"Falha na autenticação ({resp.status_code}): {resp.text}"
-        )
+        raise RuntimeError(f"Falha na autenticação remota (HTTP {resp.status_code})")
     return resp.json()["access"]

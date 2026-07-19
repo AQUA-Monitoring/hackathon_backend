@@ -13,7 +13,7 @@ from core.flood_point_registering.infra.models import Flood_Point_Register
 from core.forecast.infra.models import Forecast
 from core.occurrences.infra.models import Occurrence
 from core.users.infra.models import User
-from core.uploader.models import Image
+from core.uploader.models import Document, Image
 from core.weather.infra.models import Weather
 from core.sync.client import fetch_file
 
@@ -100,6 +100,47 @@ def sync_images(data: list, token: str) -> tuple[int, int]:
             image.description = description
             image.file.save(filename, ContentFile(payload), save=False)
             image.save(update_fields=["description", "file"])
+            updated += 1
+
+    return created, updated
+
+
+def sync_documents(data: list, token: str) -> tuple[int, int]:
+    """Import documents idempotently using their attachment key as identity."""
+    created = 0
+    updated = 0
+
+    for item in data:
+        attachment_key = _safe_uuid(item.get("attachment_key"))
+        file_url = item.get("url")
+        if not attachment_key or not isinstance(file_url, str) or not file_url:
+            logger.warning("Documento ignorado: attachment_key ou url inválido")
+            continue
+
+        document = Document.objects.filter(attachment_key=attachment_key).first()
+        description = item.get("description") or ""
+        if document and document.file.name:
+            if document.description != description:
+                document.description = description
+                document.save(update_fields=["description"])
+                updated += 1
+            continue
+
+        payload = fetch_file(file_url, token)
+        filename = Path(urlsplit(file_url).path).name or f"{attachment_key}.bin"
+
+        if document is None:
+            document = Document(
+                attachment_key=attachment_key,
+                description=description,
+            )
+            document.file.save(filename, ContentFile(payload), save=False)
+            document.save()
+            created += 1
+        else:
+            document.description = description
+            document.file.save(filename, ContentFile(payload), save=False)
+            document.save(update_fields=["description", "file"])
             updated += 1
 
     return created, updated
