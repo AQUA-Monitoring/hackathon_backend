@@ -10,6 +10,7 @@ from pathlib import Path
 from django.contrib.gis.geos import GEOSGeometry, MultiLineString, MultiPolygon, Point
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from pyproj import Transformer
 from shapely.geometry import mapping, shape
@@ -24,6 +25,17 @@ from core.addressing.infra.models import (
 
 def normalized(value: str) -> str:
     return " ".join(unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode().casefold().split())
+
+
+def source_street_name(props: dict, options: dict) -> str:
+    fields = options.get("street_props")
+    if fields:
+        return " ".join(
+            value
+            for field in fields.split(",")
+            if (value := str(props.get(field.strip()) or "").strip())
+        )
+    return str(props.get(options["street_prop"]) or "").strip()
 
 
 def geos_geometry(raw, source_crs: str, expected: set[str], *, repair=False):
@@ -68,7 +80,10 @@ def iter_source_features(path: Path, options: dict):
     """Yield source features lazily; CSV rows are never accumulated in memory."""
     if path.suffix.casefold() == ".csv":
         with path.open("r", encoding="utf-8-sig", newline="") as source:
-            for row in csv.DictReader(source):
+            delimiter = options.get("csv_delimiter") or ","
+            if len(delimiter) != 1:
+                raise CommandError("--csv-delimiter deve conter um único caractere")
+            for row in csv.DictReader(source, delimiter=delimiter):
                 try:
                     longitude = float(row[options["longitude_prop"]].replace(",", "."))
                     latitude = float(row[options["latitude_prop"]].replace(",", "."))
@@ -116,9 +131,17 @@ class Command(BaseCommand):
         parser.add_argument("--crs")
         parser.add_argument("--source-crs")
         parser.add_argument("--id-prop", default="id")
+        parser.add_argument(
+            "--id-props",
+            help="Campos separados por vírgula que compõem o ID da fonte (ex.: COD_UNICO_ENDERECO,COD_ESPECIE).",
+        )
         parser.add_argument("--name-prop", default="name")
         parser.add_argument("--region-prop", default="region")
         parser.add_argument("--street-prop", default="street")
+        parser.add_argument(
+            "--street-props",
+            help="Campos separados por vírgula que compõem o nome do logradouro, na ordem de exibição.",
+        )
         parser.add_argument("--number-prop", default="number")
         parser.add_argument("--zipcode-prop", default="zipcode")
         parser.add_argument("--official-code-prop", default="official_code")
@@ -128,10 +151,16 @@ class Command(BaseCommand):
         parser.add_argument("--complement-prop", default="complement")
         parser.add_argument("--longitude-prop", default="longitude")
         parser.add_argument("--latitude-prop", default="latitude")
+        parser.add_argument("--csv-delimiter", default=",")
         parser.add_argument("--road-class-prop", default="road_class")
         parser.add_argument("--surface-prop", default="surface")
         parser.add_argument("--direction-prop", default="direction")
         parser.add_argument("--repair-geometries", action="store_true")
+        parser.add_argument(
+            "--skip-outside-city",
+            action="store_true",
+            help="Rejeita pontos fora do limite municipal, contabilizando-os sem abortar a edição.",
+        )
         parser.add_argument("--chunk-size", type=int, default=1000)
         parser.add_argument("--dry-run", action="store_true")
 
@@ -161,7 +190,9 @@ class Command(BaseCommand):
 
         def parsed_features():
             for idx, (props, raw_geometry) in enumerate(iter_source_features(path, o), 1):
-                source_id = str(props.get(o["id_prop"]) or "").strip()
+                id_props = [item.strip() for item in (o.get("id_props") or o["id_prop"]).split(",")]
+                id_parts = [str(props.get(item) or "").strip() for item in id_props]
+                source_id = ":".join(id_parts) if all(id_parts) else ""
                 if not source_id or source_id in seen:
                     report["duplicates"] += 1
                     raise CommandError(f"Feature {idx}: ID oficial ausente ou duplicado")
@@ -171,6 +202,9 @@ class Command(BaseCommand):
                     report["repairs"].append({"feature": idx, "source_record_id": source_id, **repair_audit})
                 if city.geometry and o["kind"] == GeodataDataset.Kind.ADDRESS and not city.geometry.covers(geom):
                     report["conflicts"] += 1
+                    if o["skip_outside_city"]:
+                        report["skipped"] += 1
+                        continue
                     raise CommandError(f"Feature {idx}: ponto fora do limite municipal")
                 report["validated"] += 1
                 yield source_id, props, geom
@@ -206,9 +240,13 @@ class Command(BaseCommand):
                 previous_ids = list(previous.values_list("id", flat=True))
                 previous.update(status="superseded")
                 if o["kind"] == GeodataDataset.Kind.REGION:
-                    report["inactivated"] = Region.objects.filter(city_ref=city, dataset__authority=o["authority"], is_active=True).update(is_active=False)
+                    report["inactivated"] = Region.objects.filter(city_ref=city, is_active=True).filter(
+                        Q(dataset__authority=o["authority"]) | Q(dataset__isnull=True)
+                    ).update(is_active=False)
                 elif o["kind"] == GeodataDataset.Kind.NEIGHBORHOOD:
-                    report["inactivated"] = Neighborhood.objects.filter(city_ref=city, dataset__authority=o["authority"], is_active=True).update(is_active=False)
+                    report["inactivated"] = Neighborhood.objects.filter(city_ref=city, is_active=True).filter(
+                        Q(dataset__authority=o["authority"]) | Q(dataset__isnull=True)
+                    ).update(is_active=False)
                 elif o["kind"] == GeodataDataset.Kind.STREET:
                     report["inactivated"] = Street.objects.filter(city=city, dataset__authority=o["authority"], is_active=True).update(is_active=False)
                     RoadAxisSegment.objects.filter(city=city, dataset__authority=o["authority"], is_active=True).update(is_active=False)
@@ -255,7 +293,7 @@ class Command(BaseCommand):
                     else:
                         objects = []
                         for source_id, props, point in batch:
-                            street_name = str(props.get(o["street_prop"]) or "").strip()
+                            street_name = source_street_name(props, o)
                             neighborhood = next((item for item in neighborhoods if item.geometry.covers(point)), None)
                             if neighborhood is None:
                                 report["unmatched"] += 1

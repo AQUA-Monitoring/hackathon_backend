@@ -11,7 +11,7 @@ from django.utils import timezone
 from django.contrib.gis.geos import MultiPolygon, Polygon
 
 from core.addressing.infra.models import AddressReference, City, GeodataDataset, Neighborhood, RoadAxisSegment, Street, StreetNeighborhood
-from core.addressing.management.commands.import_addressing_dataset import chunked, geos_geometry, iter_source_features
+from core.addressing.management.commands.import_addressing_dataset import chunked, geos_geometry, iter_source_features, source_street_name
 
 
 class AddressingImportCommandTests(TestCase):
@@ -73,6 +73,110 @@ class AddressingImportCommandTests(TestCase):
         report = address.dataset.metadata["report"]
         for field in ("created", "updated", "inactivated", "skipped", "duplicates", "errors", "conflicts", "spatial_links", "unmatched"):
             self.assertIn(field, report)
+
+    def test_csv_accepts_the_official_cnefe_semicolon_delimiter(self):
+        city = City.objects.get(name="Joinville")
+        city.geometry = MultiPolygon(Polygon(((-50, -28), (-47, -28), (-47, -25), (-50, -25), (-50, -28))), srid=4326)
+        city.save(update_fields=["geometry"])
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "cnefe.csv"
+            path.write_text(
+                "COD_UNICO_ENDERECO;NOM_SEGLOGR;NUM_ENDERECO;CEP;LATITUDE;LONGITUDE\n"
+                "106338827;ANTONIO AMARO DE BORBA;0;89245000;-26.519735;-48.714998\n",
+                encoding="utf-8",
+            )
+            call_command(
+                "import_addressing_dataset",
+                str(path),
+                city_code="4209102",
+                kind="address_point",
+                authority="IBGE",
+                title="CNEFE",
+                source_url="https://example.test/cnefe",
+                license_name="IBGE",
+                source_version="2022",
+                csv_delimiter=";",
+                id_prop="COD_UNICO_ENDERECO",
+                street_prop="NOM_SEGLOGR",
+                number_prop="NUM_ENDERECO",
+                zipcode_prop="CEP",
+                latitude_prop="LATITUDE",
+                longitude_prop="LONGITUDE",
+            )
+        address = AddressReference.objects.get()
+        self.assertEqual(address.source_record_id, "106338827")
+        self.assertEqual(address.street_name, "ANTONIO AMARO DE BORBA")
+        self.assertEqual(address.zipcode, "89245000")
+
+    def test_csv_can_compose_the_cnefe_source_identifier(self):
+        city = City.objects.get(name="Joinville")
+        city.geometry = MultiPolygon(Polygon(((-50, -28), (-47, -28), (-47, -25), (-50, -25), (-50, -28))), srid=4326)
+        city.save(update_fields=["geometry"])
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "cnefe.csv"
+            path.write_text(
+                "COD_UNICO_ENDERECO;COD_ESPECIE;NOM_SEGLOGR;LATITUDE;LONGITUDE\n"
+                "68996597;6;SANTA FE;-26.406187;-48.801034\n"
+                "68996597;8;SANTA FE;-26.406187;-48.801034\n",
+                encoding="utf-8",
+            )
+            call_command(
+                "import_addressing_dataset",
+                str(path),
+                city_code="4209102",
+                kind="address_point",
+                authority="IBGE",
+                title="CNEFE",
+                source_url="https://example.test/cnefe",
+                license_name="IBGE",
+                source_version="2022",
+                csv_delimiter=";",
+                id_props="COD_UNICO_ENDERECO,COD_ESPECIE",
+                street_prop="NOM_SEGLOGR",
+                latitude_prop="LATITUDE",
+                longitude_prop="LONGITUDE",
+            )
+        self.assertEqual(
+            set(AddressReference.objects.values_list("source_record_id", flat=True)),
+            {"68996597:6", "68996597:8"},
+        )
+
+    def test_composes_the_cnefe_street_title_and_name(self):
+        value = source_street_name(
+            {"NOM_TITULO_SEGLOGR": "GOVERNADOR", "NOM_SEGLOGR": "MARIO COVAS"},
+            {
+                "street_prop": "NOM_SEGLOGR",
+                "street_props": "NOM_TITULO_SEGLOGR,NOM_SEGLOGR",
+            },
+        )
+        self.assertEqual(value, "GOVERNADOR MARIO COVAS")
+
+    def test_outside_address_can_be_rejected_and_reported_explicitly(self):
+        city = City.objects.get(name="Joinville")
+        city.geometry = MultiPolygon(Polygon(((0, 0), (1, 0), (1, 1), (0, 1), (0, 0))), srid=4326)
+        city.save(update_fields=["geometry"])
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "addresses.csv"
+            path.write_text(
+                "id,street,longitude,latitude\ninside,Rua A,0.5,0.5\noutside,Rua B,2,2\n",
+                encoding="utf-8",
+            )
+            call_command(
+                "import_addressing_dataset",
+                str(path),
+                city_code="4209102",
+                kind="address_point",
+                authority="IBGE",
+                title="CNEFE",
+                source_url="https://example.test/cnefe",
+                license_name="IBGE",
+                source_version="2022",
+                skip_outside_city=True,
+            )
+        dataset = GeodataDataset.objects.get()
+        self.assertEqual(AddressReference.objects.get().source_record_id, "inside")
+        self.assertEqual(dataset.metadata["report"]["conflicts"], 1)
+        self.assertEqual(dataset.metadata["report"]["skipped"], 1)
 
     def test_reprojects_epsg_31982_with_longitude_latitude_order(self):
         raw = {"type": "Point", "coordinates": [716000, 7095000]}
