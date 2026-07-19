@@ -17,8 +17,10 @@ from uuid import UUID
 
 from core.addressing.application.services import build_neighborhoods_feature_collection
 from core.addressing.infra.repositories import DjangoNeighborhoodRepository
-from core.addressing.infra.models import AddressReference, City, GeodataDataset, Region, Neighborhood, Street
+from core.addressing.infra.models import AddressReference, City, GeodataDataset, Region, Neighborhood, RoadAxisSegment, Street
 from core.addressing.geojson import feature_collection
+from core.users.infra.models import User
+from core.users.permissions import IsAppAdmin
 
 
 class AddressingViewSet(viewsets.ViewSet):
@@ -32,7 +34,7 @@ class AddressingViewSet(viewsets.ViewSet):
         if self.action in {"resolve"}:
             return [permissions.IsAuthenticated()]
         if self.action in {"address_references", "datasets", "reports", "snapshot", "import_dataset"}:
-            return [permissions.IsAdminUser()]
+            return [IsAppAdmin()]
         return [permissions.AllowAny()]
     def _error(self, code, detail, http_status=status.HTTP_400_BAD_REQUEST, fields=None):
         return Response({"error": {"code": code, "detail": detail, "fields": fields or {}}}, status=http_status)
@@ -46,7 +48,15 @@ class AddressingViewSet(viewsets.ViewSet):
         return paginator.get_paginated_response([mapper(item) for item in page])
 
     def _require(self, request, admin=False):
-        allowed = request.user and request.user.is_authenticated and (not admin or request.user.is_staff)
+        allowed = (
+            request.user
+            and request.user.is_authenticated
+            and (
+                not admin
+                or getattr(request.user, "type", None) == User.UserType.ADMIN
+                or getattr(request.user, "is_staff", False)
+            )
+        )
         return None if allowed else self._error("forbidden", "Acesso não autorizado.", status.HTTP_403_FORBIDDEN)
 
     def _uuid_filter(self, request, name):
@@ -276,6 +286,32 @@ class AddressingViewSet(viewsets.ViewSet):
         if bbox:
             qs = qs.filter(geometry__intersects=bbox)
         return self._paginate(request, qs.distinct(), lambda s: {"id": str(s.id), "city_id": str(s.city_id), "name": s.name, "type": s.street_type, **({"geometry": json.loads(s.geometry.geojson) if s.geometry else None} if include_geometry == "true" else {}), "dataset_id": str(s.dataset_id)})
+
+    @action(detail=False, methods=["get"], url_path="road-segments")
+    def road_segments(self, request):
+        qs = RoadAxisSegment.objects.filter(is_active=True).select_related("city", "street", "dataset").order_by("id")
+        city_id, error = self._uuid_filter(request, "city_id")
+        if error: return error
+        street_id, error = self._uuid_filter(request, "street_id")
+        if error: return error
+        neighborhood_id, error = self._uuid_filter(request, "neighborhood_id")
+        if error: return error
+        bbox, error = self._bbox_filter(request)
+        if error: return error
+        include_geometry = request.query_params.get("include_geometry", "false").lower()
+        if include_geometry not in {"true", "false"}:
+            return self._error("invalid_filter", "include_geometry deve ser true ou false.", fields={"include_geometry": ["Booleano inválido."]})
+        if city_id: qs = qs.filter(city_id=city_id)
+        if street_id: qs = qs.filter(street_id=street_id)
+        if neighborhood_id: qs = qs.filter(neighborhood_links__neighborhood_id=neighborhood_id)
+        if bbox: qs = qs.filter(geometry__intersects=bbox)
+        return self._paginate(request, qs.distinct(), lambda segment: {
+            "id": str(segment.id), "city_id": str(segment.city_id),
+            "street": ({"id": str(segment.street_id), "name": segment.street.name} if segment.street_id else None),
+            "dataset_id": str(segment.dataset_id), "source_record_id": segment.source_record_id,
+            "road_class": segment.road_class, "surface": segment.surface, "direction": segment.direction,
+            **({"geometry": json.loads(segment.geometry.geojson)} if include_geometry == "true" else {}),
+        })
 
     @action(detail=False, methods=["get"], url_path="address-references")
     def address_references(self, request):

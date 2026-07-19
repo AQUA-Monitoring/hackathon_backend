@@ -17,8 +17,8 @@ from shapely.validation import explain_validity, make_valid
 from shapely.ops import transform
 
 from core.addressing.infra.models import (
-    AddressReference, City, GeodataDataset, Neighborhood, Region, Street,
-    StreetNeighborhood,
+    AddressReference, City, GeodataDataset, Neighborhood, Region, RoadAxisSegment,
+    RoadAxisSegmentNeighborhood, Street, StreetNeighborhood,
 )
 
 
@@ -128,6 +128,9 @@ class Command(BaseCommand):
         parser.add_argument("--complement-prop", default="complement")
         parser.add_argument("--longitude-prop", default="longitude")
         parser.add_argument("--latitude-prop", default="latitude")
+        parser.add_argument("--road-class-prop", default="road_class")
+        parser.add_argument("--surface-prop", default="surface")
+        parser.add_argument("--direction-prop", default="direction")
         parser.add_argument("--repair-geometries", action="store_true")
         parser.add_argument("--chunk-size", type=int, default=1000)
         parser.add_argument("--dry-run", action="store_true")
@@ -208,6 +211,7 @@ class Command(BaseCommand):
                     report["inactivated"] = Neighborhood.objects.filter(city_ref=city, dataset__authority=o["authority"], is_active=True).update(is_active=False)
                 elif o["kind"] == GeodataDataset.Kind.STREET:
                     report["inactivated"] = Street.objects.filter(city=city, dataset__authority=o["authority"], is_active=True).update(is_active=False)
+                    RoadAxisSegment.objects.filter(city=city, dataset__authority=o["authority"], is_active=True).update(is_active=False)
                 elif o["kind"] == GeodataDataset.Kind.ADDRESS:
                     report["inactivated"] = AddressReference.objects.filter(city=city, dataset__authority=o["authority"], is_active=True).update(is_active=False)
                 regions = {normalized(region.name): region for region in Region.objects.filter(city_ref=city, is_active=True)}
@@ -236,7 +240,18 @@ class Command(BaseCommand):
                         Street.objects.bulk_create(objects, batch_size=o["chunk_size"])
                         links = [StreetNeighborhood(street=street, neighborhood=neighborhood) for street in objects for neighborhood in neighborhoods if neighborhood.geometry.intersects(street.geometry)]
                         StreetNeighborhood.objects.bulk_create(links, batch_size=o["chunk_size"], ignore_conflicts=True)
-                        report["spatial_links"] += len(links)
+                        segments = [RoadAxisSegment(
+                            city=city, street=street, dataset=dataset,
+                            source_record_id=street.source_record_id, geometry=street.geometry,
+                            road_class=str(street.properties.get(o["road_class_prop"]) or ""),
+                            surface=str(street.properties.get(o["surface_prop"]) or ""),
+                            direction=str(street.properties.get(o["direction_prop"]) or ""),
+                            properties=street.properties,
+                        ) for street in objects]
+                        RoadAxisSegment.objects.bulk_create(segments, batch_size=o["chunk_size"])
+                        segment_links = [RoadAxisSegmentNeighborhood(segment=segment, neighborhood=neighborhood) for segment in segments for neighborhood in neighborhoods if neighborhood.geometry.intersects(segment.geometry)]
+                        RoadAxisSegmentNeighborhood.objects.bulk_create(segment_links, batch_size=o["chunk_size"], ignore_conflicts=True)
+                        report["spatial_links"] += len(links) + len(segment_links)
                     else:
                         objects = []
                         for source_id, props, point in batch:

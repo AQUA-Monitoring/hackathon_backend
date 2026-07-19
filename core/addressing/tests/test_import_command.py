@@ -10,7 +10,7 @@ from django.utils import timezone
 
 from django.contrib.gis.geos import MultiPolygon, Polygon
 
-from core.addressing.infra.models import AddressReference, City, GeodataDataset, Neighborhood, Street, StreetNeighborhood
+from core.addressing.infra.models import AddressReference, City, GeodataDataset, Neighborhood, RoadAxisSegment, Street, StreetNeighborhood
 from core.addressing.management.commands.import_addressing_dataset import chunked, geos_geometry, iter_source_features
 
 
@@ -124,6 +124,7 @@ class AddressingImportCommandTests(TestCase):
             street_path.write_text(json.dumps({"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {"id": "r1", "name": "Rua A"}, "geometry": {"type": "LineString", "coordinates": [[-.5, .5], [1.5, .5]]}}]}), encoding="utf-8")
             call_command("import_addressing_dataset", str(street_path), city="Joinville", kind="street", authority="Prefeitura", title="Ruas", source_url="https://example.test/ruas", license_name="Licença oficial", source_version="1", id_prop="id", name_prop="name")
             self.assertEqual(StreetNeighborhood.objects.filter(street=Street.objects.get(source_record_id="r1")).count(), 1)
+            self.assertEqual(RoadAxisSegment.objects.get(source_record_id="r1").neighborhood_links.count(), 1)
             address_path = Path(directory) / "addresses.geojson"
             address_path.write_text(json.dumps({"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {"id": "a1", "street": "Rua A", "number": "10"}, "geometry": {"type": "Point", "coordinates": [.5, .5]}}]}), encoding="utf-8")
             call_command("import_addressing_dataset", str(address_path), city="Joinville", kind="address_point", authority="IBGE", title="Endereços", source_url="https://example.test/enderecos", license_name="Licença oficial", source_version="2022", id_prop="id")

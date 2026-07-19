@@ -210,6 +210,38 @@ class StreetNeighborhood(models.Model):
         constraints = [models.UniqueConstraint(fields=["street", "neighborhood"], name="uniq_street_neighborhood")]
 
 
+class RoadAxisSegment(TimestampedModel):
+    """A versioned physical road-axis feature from an authoritative dataset."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    city = models.ForeignKey(City, on_delete=models.PROTECT, related_name="road_axis_segments")
+    street = models.ForeignKey(Street, null=True, blank=True, on_delete=models.PROTECT, related_name="axis_segments")
+    dataset = models.ForeignKey(GeodataDataset, on_delete=models.PROTECT, related_name="road_axis_segments")
+    source_record_id = models.CharField(max_length=255)
+    geometry = models.MultiLineStringField(srid=4326)
+    road_class = models.CharField(max_length=80, blank=True)
+    surface = models.CharField(max_length=80, blank=True)
+    direction = models.CharField(max_length=40, blank=True)
+    properties = models.JSONField(default=dict, blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["dataset", "source_record_id"], name="uniq_axis_segment_dataset_source"),
+        ]
+        indexes = [models.Index(fields=["city", "street", "is_active"], name="addressing__city_id_axis_idx")]
+
+
+class RoadAxisSegmentNeighborhood(models.Model):
+    segment = models.ForeignKey(RoadAxisSegment, on_delete=models.CASCADE, related_name="neighborhood_links")
+    neighborhood = models.ForeignKey(Neighborhood, on_delete=models.PROTECT, related_name="road_axis_segment_links")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["segment", "neighborhood"], name="uniq_axis_segment_neighborhood"),
+        ]
+
+
 class AddressReference(TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     city = models.ForeignKey(City, on_delete=models.PROTECT, related_name="address_references")
