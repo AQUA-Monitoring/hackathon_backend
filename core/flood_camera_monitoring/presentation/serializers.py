@@ -41,6 +41,8 @@ class RejectUnknownFieldsMixin:
 class CameraAddressInputSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
     city_id = serializers.UUIDField()
     neighborhood_id = serializers.UUIDField()
+    street_id = serializers.UUIDField(required=False, allow_null=True)
+    address_reference_id = serializers.UUIDField(required=False, allow_null=True)
     street = serializers.CharField(max_length=255, allow_blank=False)
     number = serializers.CharField(max_length=50, required=False, allow_blank=True)
     state = serializers.CharField(max_length=80, required=False, allow_blank=True)
@@ -166,6 +168,12 @@ def build_address_payload(camera):
     city_ref = address.city_ref
     return {
         "id": str(address.id),
+        "street_id": str(address.street_ref_id) if address.street_ref_id else None,
+        "address_reference_id": (
+            str(address.address_reference_id)
+            if address.address_reference_id
+            else None
+        ),
         "street": address.street,
         "number": address.number,
         "city": address.city,

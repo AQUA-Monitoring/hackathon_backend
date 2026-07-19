@@ -1,4 +1,5 @@
 from datetime import timedelta
+import unicodedata
 from uuid import UUID
 
 from django.db import connections, transaction
@@ -22,7 +23,14 @@ from core.flood_camera_monitoring.presentation.serializers import (
 )
 from django.conf import settings
 from core.flood_camera_monitoring.presentation.utils import build_prediction_payload
-from core.addressing.infra.models import Address, City, Neighborhood
+from core.addressing.infra.models import (
+    Address,
+    AddressReference,
+    City,
+    GeodataDataset,
+    Neighborhood,
+    Street,
+)
 from core.addressing.geojson import point_inside_geometry
 from core.flood_camera_monitoring.application.nearby_cameras import (
     MissingCameraCoordinates,
@@ -72,6 +80,16 @@ def _parse_uuid_filter(value, field_name):
             {field_name: [f"{field_name} inválido."]},
             status=status.HTTP_400_BAD_REQUEST,
         )
+
+
+def _normalized_address_text(value):
+    return " ".join(
+        unicodedata.normalize("NFKD", value or "")
+        .encode("ascii", "ignore")
+        .decode()
+        .casefold()
+        .split()
+    )
 
 
 class NearbyCamerasPagination(DefaultPageNumberPagination):
@@ -464,8 +482,162 @@ class CameraMetadataViewSet(SafeOrderingMixin, viewsets.ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        selected_street = None
+        address_reference = None
+        street_id = address_data.get("street_id")
+        address_reference_id = address_data.get("address_reference_id")
+
+        if address_reference_id:
+            address_reference = AddressReference.objects.select_related(
+                "city", "neighborhood", "street", "dataset"
+            ).filter(
+                pk=address_reference_id,
+                is_active=True,
+                dataset__status=GeodataDataset.Status.ACTIVE,
+            ).first()
+            if address_reference is None:
+                return Response(
+                    {
+                        "address": {
+                            "address_reference_id": [
+                                "Referência de endereço não encontrada ou inativa."
+                            ]
+                        }
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if address_reference.city_id != city.id:
+                return Response(
+                    {
+                        "address": {
+                            "address_reference_id": [
+                                "A referência de endereço não pertence à cidade informada."
+                            ]
+                        }
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if (
+                address_reference.neighborhood_id
+                and address_reference.neighborhood_id != neighborhood.id
+            ):
+                return Response(
+                    {
+                        "address": {
+                            "address_reference_id": [
+                                "A referência de endereço não pertence ao bairro informado."
+                            ]
+                        }
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            reference_street = address_reference.street
+            if reference_street and (
+                reference_street.city_id != city.id
+                or not reference_street.is_active
+                or reference_street.dataset.status != GeodataDataset.Status.ACTIVE
+            ):
+                return Response(
+                    {
+                        "address": {
+                            "address_reference_id": [
+                                "A rua vinculada à referência está inativa ou inconsistente."
+                            ]
+                        }
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            selected_street = reference_street
+            if street_id:
+                explicit_street = Street.objects.select_related("dataset").filter(
+                    pk=street_id,
+                    city=city,
+                    is_active=True,
+                    dataset__status=GeodataDataset.Status.ACTIVE,
+                ).first()
+                if (
+                    explicit_street is None
+                    or explicit_street.normalized_name
+                    != _normalized_address_text(address_reference.street_name)
+                ):
+                    return Response(
+                        {
+                            "address": {
+                                "street_id": [
+                                    "A rua não corresponde à referência de endereço informada."
+                                ]
+                            }
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                selected_street = explicit_street
+
+        if street_id and selected_street is None:
+            selected_street = Street.objects.select_related("dataset").filter(
+                pk=street_id,
+                city=city,
+                is_active=True,
+                dataset__status=GeodataDataset.Status.ACTIVE,
+            ).first()
+            if selected_street is None:
+                return Response(
+                    {
+                        "address": {
+                            "street_id": [
+                                "Rua não encontrada, inativa ou incompatível com a cidade."
+                            ]
+                        }
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        if selected_street and not address_reference:
+            linked_neighborhoods = selected_street.neighborhood_links.all()
+            if linked_neighborhoods.exists() and not linked_neighborhoods.filter(
+                neighborhood=neighborhood
+            ).exists():
+                return Response(
+                    {
+                        "address": {
+                            "street_id": [
+                                "A rua não está associada ao bairro informado."
+                            ]
+                        }
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        if address_reference and not address_reference.neighborhood_id:
+            reference_match = point_inside_geometry(
+                address_reference.location.x,
+                address_reference.location.y,
+                neighborhood.geometry,
+            )
+            if reference_match is False:
+                return Response(
+                    {
+                        "address": {
+                            "address_reference_id": [
+                                "A coordenada da referência está fora do bairro informado."
+                            ]
+                        }
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         longitude = address_data["longitude"]
         latitude = address_data["latitude"]
+        if longitude == 0 and latitude == 0:
+            return Response(
+                {
+                    "address": {
+                        "coordinates": [
+                            "[0,0] não representa uma localização operacional resolvida."
+                        ]
+                    }
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         try:
             neighborhood_match = point_inside_geometry(
                 longitude, latitude, neighborhood.geometry
@@ -517,14 +689,47 @@ class CameraMetadataViewSet(SafeOrderingMixin, viewsets.ViewSet):
                     status=status.HTTP_409_CONFLICT,
                 )
 
+            canonical_street = (
+                address_reference.street_name
+                if address_reference
+                else selected_street.name
+                if selected_street
+                else address_data["street"].strip()
+            )
+            canonical_number = (
+                address_reference.number
+                if address_reference
+                else address_data.get("number", "").strip()
+            )
+            canonical_zipcode = (
+                address_reference.zipcode
+                if address_reference
+                else address_data.get("zipcode", "").strip()
+            )
             address = Address.objects.create(
-                street=address_data["street"].strip(),
-                number=address_data.get("number", "").strip(),
+                street=canonical_street,
+                number=canonical_number,
                 city=city.name,
                 city_ref=city,
+                street_ref=selected_street,
+                address_reference=address_reference,
+                dataset=(
+                    address_reference.dataset
+                    if address_reference
+                    else selected_street.dataset
+                    if selected_street
+                    else None
+                ),
+                source_record_id=(
+                    address_reference.source_record_id
+                    if address_reference
+                    else selected_street.source_record_id
+                    if selected_street
+                    else ""
+                ),
                 state=address_data.get("state", "").strip(),
                 country=address_data.get("country", "Brazil").strip(),
-                zipcode=address_data.get("zipcode", "").strip(),
+                zipcode=canonical_zipcode,
                 latitude=address_data["latitude"],
                 longitude=address_data["longitude"],
                 neighborhood=neighborhood,

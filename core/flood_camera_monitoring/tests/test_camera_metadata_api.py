@@ -3,12 +3,21 @@ from types import ModuleType
 from unittest.mock import Mock, patch
 
 from django.db.models.deletion import ProtectedError
+from django.contrib.gis.geos import Point
 from django.test import override_settings
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from core.addressing.infra.models import City, Neighborhood, Region
+from core.addressing.infra.models import (
+    AddressReference,
+    City,
+    GeodataDataset,
+    Neighborhood,
+    Region,
+    Street,
+    StreetNeighborhood,
+)
 from core.flood_camera_monitoring.infra.models import (
     Camera,
     CameraOperationalSnapshot,
@@ -88,6 +97,182 @@ class CameraMetadataApiTests(APITestCase):
         self.assertEqual(snapshot.analysis_status, snapshot.AnalysisStatus.NOT_ANALYZED)
         self.assertEqual(snapshot.model_status, snapshot.ModelStatus.UNKNOWN)
         self.assertEqual(response.data["created_by"], {"id": str(self.admin.id)})
+
+    def test_admin_creates_camera_with_canonical_address_reference_snapshot(self):
+        dataset = GeodataDataset.objects.create(
+            city=self.city,
+            kind=GeodataDataset.Kind.ADDRESS,
+            authority="IBGE",
+            title="CNEFE",
+            source_url="https://example.test/cnefe",
+            license_name="Licença pública",
+            source_version="2022",
+            retrieved_at=timezone.now(),
+            sha256="1" * 64,
+            source_crs="EPSG:4326",
+            status=GeodataDataset.Status.ACTIVE,
+        )
+        street = Street.objects.create(
+            city=self.city,
+            dataset=dataset,
+            source_record_id="street-1",
+            name="Rua Canônica",
+            normalized_name="rua canonica",
+        )
+        StreetNeighborhood.objects.create(
+            street=street, neighborhood=self.neighborhood
+        )
+        reference = AddressReference.objects.create(
+            city=self.city,
+            neighborhood=self.neighborhood,
+            street=street,
+            dataset=dataset,
+            source_record_id="address-1",
+            street_name="Rua Canônica",
+            number="321",
+            zipcode="89200-321",
+            location=Point(-48.853, -26.285, srid=4326),
+        )
+        payload = self.camera_payload(
+            hls="https://cameras.example/canonical.m3u8"
+        )
+        payload["address"].update(
+            {
+                "street_id": str(street.id),
+                "address_reference_id": str(reference.id),
+                "street": "Texto digitado desatualizado",
+                "number": "999",
+                "zipcode": "00000-000",
+            }
+        )
+        self.client.force_authenticate(self.admin)
+        response = self.client.post(
+            "/api/flood_monitoring/cameras/", payload, format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        camera = Camera.objects.select_related("address").get(pk=response.data["id"])
+        self.assertEqual(camera.address.street_ref, street)
+        self.assertEqual(camera.address.address_reference, reference)
+        self.assertEqual(camera.address.dataset, dataset)
+        self.assertEqual(camera.address.street, "Rua Canônica")
+        self.assertEqual(camera.address.number, "321")
+        self.assertEqual(camera.address.zipcode, "89200-321")
+        self.assertEqual(response.data["address"]["street_id"], str(street.id))
+        self.assertEqual(
+            response.data["address"]["address_reference_id"], str(reference.id)
+        )
+
+    def test_camera_rejects_inconsistent_street_and_address_reference(self):
+        dataset = GeodataDataset.objects.create(
+            city=self.city,
+            kind=GeodataDataset.Kind.ADDRESS,
+            authority="IBGE",
+            title="CNEFE",
+            source_url="https://example.test/cnefe-inconsistent",
+            license_name="Licença pública",
+            source_version="2022",
+            retrieved_at=timezone.now(),
+            sha256="2" * 64,
+            source_crs="EPSG:4326",
+            status=GeodataDataset.Status.ACTIVE,
+        )
+        street = Street.objects.create(
+            city=self.city,
+            dataset=dataset,
+            source_record_id="street-good",
+            name="Rua Correta",
+            normalized_name="rua correta",
+        )
+        other_street = Street.objects.create(
+            city=self.city,
+            dataset=dataset,
+            source_record_id="street-wrong",
+            name="Rua Incorreta",
+            normalized_name="rua incorreta",
+        )
+        reference = AddressReference.objects.create(
+            city=self.city,
+            neighborhood=self.neighborhood,
+            street=street,
+            dataset=dataset,
+            source_record_id="address-good",
+            street_name="Rua Correta",
+            location=Point(-48.853, -26.285, srid=4326),
+        )
+        payload = self.camera_payload(
+            hls="https://cameras.example/inconsistent.m3u8"
+        )
+        payload["address"].update(
+            {
+                "street_id": str(other_street.id),
+                "address_reference_id": str(reference.id),
+            }
+        )
+        self.client.force_authenticate(self.admin)
+        response = self.client.post(
+            "/api/flood_monitoring/cameras/", payload, format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("street_id", response.data["address"])
+
+    def test_camera_accepts_equivalent_axes_for_the_same_street_name(self):
+        dataset = GeodataDataset.objects.create(
+            city=self.city,
+            kind=GeodataDataset.Kind.ADDRESS,
+            authority="IBGE",
+            title="CNEFE equivalent axes",
+            source_url="https://example.test/cnefe-equivalent",
+            license_name="Licença pública",
+            source_version="2022",
+            retrieved_at=timezone.now(),
+            sha256="3" * 64,
+            source_crs="EPSG:4326",
+            status=GeodataDataset.Status.ACTIVE,
+        )
+        reference_axis = Street.objects.create(
+            city=self.city,
+            dataset=dataset,
+            source_record_id="street-reference-axis",
+            name="Rua Canônica",
+            normalized_name="rua canonica",
+        )
+        selected_axis = Street.objects.create(
+            city=self.city,
+            dataset=dataset,
+            source_record_id="street-selected-axis",
+            name="Rua Canônica",
+            normalized_name="rua canonica",
+        )
+        StreetNeighborhood.objects.create(
+            street=selected_axis, neighborhood=self.neighborhood
+        )
+        reference = AddressReference.objects.create(
+            city=self.city,
+            neighborhood=self.neighborhood,
+            street=reference_axis,
+            dataset=dataset,
+            source_record_id="address-equivalent-axis",
+            street_name="Rua Canônica",
+            number="42",
+            location=Point(-48.853, -26.285, srid=4326),
+        )
+        payload = self.camera_payload(
+            hls="https://cameras.example/equivalent-axis.m3u8"
+        )
+        payload["address"].update(
+            {
+                "street_id": str(selected_axis.id),
+                "address_reference_id": str(reference.id),
+            }
+        )
+        self.client.force_authenticate(self.admin)
+        response = self.client.post(
+            "/api/flood_monitoring/cameras/", payload, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["address"]["street_id"], str(selected_axis.id))
 
     def test_creation_requires_admin_and_rejects_client_audit_fields(self):
         response = self.client.post(

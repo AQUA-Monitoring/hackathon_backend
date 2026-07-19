@@ -261,4 +261,14 @@ class AddressReference(TimestampedModel):
     is_active = models.BooleanField(default=True, db_index=True)
     class Meta:
         constraints = [models.UniqueConstraint(fields=["dataset", "source_record_id"], name="uniq_addressref_dataset_source")]
-        indexes = [models.Index(fields=["city", "street_name", "number"])]
+        indexes = [
+            models.Index(fields=["city", "street_name", "number"]),
+            models.Index(
+                fields=["city", "street", "is_active", "street_name"],
+                name="addrref_street_lookup_idx",
+            ),
+            models.Index(
+                fields=["city", "neighborhood", "is_active"],
+                name="addrref_neigh_lookup_idx",
+            ),
+        ]

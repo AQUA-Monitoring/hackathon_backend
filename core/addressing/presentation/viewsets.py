@@ -1,4 +1,5 @@
 import json
+import unicodedata
 from io import StringIO
 from pathlib import Path
 from django.conf import settings
@@ -31,7 +32,7 @@ class AddressingViewSet(viewsets.ViewSet):
         raise exceptions.PermissionDenied(payload)
 
     def get_permissions(self):
-        if self.action in {"resolve"}:
+        if self.action in {"resolve", "autocomplete"}:
             return [permissions.IsAuthenticated()]
         if self.action in {"address_references", "datasets", "reports", "snapshot", "import_dataset"}:
             return [IsAppAdmin()]
@@ -79,6 +80,16 @@ class AddressingViewSet(viewsets.ViewSet):
         except (TypeError, ValueError):
             return None, self._error("invalid_filter", "bbox deve ser west,south,east,north em EPSG:4326.", fields={"bbox": ["BBox inválido."]})
         return Polygon.from_bbox((west, south, east, north)), None
+
+    @staticmethod
+    def _normalized_search(value):
+        return " ".join(
+            unicodedata.normalize("NFKD", value or "")
+            .encode("ascii", "ignore")
+            .decode()
+            .casefold()
+            .split()
+        )
     @action(detail=False, methods=["get"], url_path="cities")
     def cities(self, request):
         data = [
@@ -286,6 +297,176 @@ class AddressingViewSet(viewsets.ViewSet):
         if bbox:
             qs = qs.filter(geometry__intersects=bbox)
         return self._paginate(request, qs.distinct(), lambda s: {"id": str(s.id), "city_id": str(s.city_id), "name": s.name, "type": s.street_type, **({"geometry": json.loads(s.geometry.geojson) if s.geometry else None} if include_geometry == "true" else {}), "dataset_id": str(s.dataset_id)})
+
+    @action(detail=False, methods=["get"], url_path="autocomplete")
+    def autocomplete(self, request):
+        """Return a small authenticated catalog for camera registration forms."""
+
+        kind = str(request.query_params.get("kind", "")).strip().casefold()
+        if kind not in {"street", "address"}:
+            return self._error(
+                "invalid_filter",
+                "kind deve ser street ou address.",
+                fields={"kind": ["Tipo inválido."]},
+            )
+
+        query = str(request.query_params.get("q", "")).strip()
+        if len(query) < 2:
+            return self._error(
+                "invalid_filter",
+                "q deve possuir ao menos 2 caracteres.",
+                fields={"q": ["Informe ao menos 2 caracteres."]},
+            )
+
+        city_id, error = self._uuid_filter(request, "city_id")
+        if error:
+            return error
+        if city_id is None:
+            return self._error(
+                "invalid_filter",
+                "city_id é obrigatório.",
+                fields={"city_id": ["Campo obrigatório."]},
+            )
+        city = City.objects.filter(pk=city_id, is_active=True).first()
+        if city is None:
+            return self._error(
+                "not_found",
+                "Cidade não encontrada.",
+                status.HTTP_404_NOT_FOUND,
+                fields={"city_id": ["Cidade não encontrada."]},
+            )
+
+        neighborhood_id, error = self._uuid_filter(request, "neighborhood_id")
+        if error:
+            return error
+        neighborhood = None
+        if neighborhood_id:
+            neighborhood = Neighborhood.objects.filter(
+                pk=neighborhood_id, is_active=True
+            ).first()
+            if neighborhood is None:
+                return self._error(
+                    "not_found",
+                    "Bairro não encontrado.",
+                    status.HTTP_404_NOT_FOUND,
+                    fields={"neighborhood_id": ["Bairro não encontrado."]},
+                )
+            if neighborhood.city_ref_id != city.id:
+                return self._error(
+                    "invalid_filter",
+                    "O bairro não pertence à cidade informada.",
+                    fields={"neighborhood_id": ["Bairro incompatível com a cidade."]},
+                )
+
+        normalized_query = self._normalized_search(query)
+        if kind == "street":
+            qs = Street.objects.filter(
+                city=city,
+                is_active=True,
+                dataset__status=GeodataDataset.Status.ACTIVE,
+                normalized_name__startswith=normalized_query,
+            ).select_related("dataset")
+            if neighborhood:
+                qs = qs.filter(neighborhood_links__neighborhood=neighborhood)
+            # A fonte viária pode publicar vários eixos físicos para o mesmo
+            # logradouro. O formulário precisa de uma identidade textual, não
+            # de vinte segmentos homônimos.
+            items = list(
+                qs.order_by("normalized_name", "id")
+                .distinct("normalized_name")[:20]
+            )
+            return Response(
+                {
+                    "count": len(items),
+                    "results": [
+                        {
+                            "id": str(street.id),
+                            "kind": "street",
+                            "label": street.name,
+                            "name": street.name,
+                            "type": street.street_type,
+                            "city_id": str(street.city_id),
+                            "dataset_id": str(street.dataset_id),
+                        }
+                        for street in items
+                    ],
+                }
+            )
+
+        street_id, error = self._uuid_filter(request, "street_id")
+        if error:
+            return error
+        street = None
+        if street_id:
+            street = Street.objects.filter(
+                pk=street_id,
+                city=city,
+                is_active=True,
+                dataset__status=GeodataDataset.Status.ACTIVE,
+            ).first()
+            if street is None:
+                return self._error(
+                    "invalid_filter",
+                    "A rua não pertence à cidade informada ou está inativa.",
+                    fields={"street_id": ["Rua incompatível com a cidade."]},
+                )
+            if neighborhood and not street.neighborhood_links.filter(
+                neighborhood=neighborhood
+            ).exists():
+                return self._error(
+                    "invalid_filter",
+                    "A rua não está associada ao bairro informado.",
+                    fields={"street_id": ["Rua incompatível com o bairro."]},
+                )
+
+        qs = AddressReference.objects.filter(
+            city=city,
+            is_active=True,
+            dataset__status=GeodataDataset.Status.ACTIVE,
+        ).select_related("street", "neighborhood", "dataset")
+        if neighborhood:
+            qs = qs.filter(neighborhood=neighborhood)
+        if street:
+            # Referências CNEFE podem apontar para outro segmento físico com o
+            # mesmo nome; filtre pela identidade do logradouro.
+            qs = qs.filter(street_name__iexact=street.name)
+        qs = qs.filter(
+            Q(street_name__istartswith=query)
+            | Q(number__istartswith=query)
+            | Q(zipcode__istartswith=query)
+        )
+        items = list(qs.order_by("street_name", "number", "id")[:20])
+        return Response(
+            {
+                "count": len(items),
+                "results": [
+                    {
+                        "id": str(address.id),
+                        "kind": "address",
+                        "label": ", ".join(
+                            value
+                            for value in (address.street_name, address.number)
+                            if value
+                        ),
+                        "city_id": str(address.city_id),
+                        "neighborhood_id": (
+                            str(address.neighborhood_id)
+                            if address.neighborhood_id
+                            else None
+                        ),
+                        "street_id": (
+                            str(street.id) if street else None
+                        ),
+                        "street": address.street_name,
+                        "number": address.number,
+                        "zipcode": address.zipcode,
+                        "location": json.loads(address.location.geojson),
+                        "dataset_id": str(address.dataset_id),
+                    }
+                    for address in items
+                ],
+            }
+        )
 
     @action(detail=False, methods=["get"], url_path="road-segments")
     def road_segments(self, request):

@@ -22,6 +22,158 @@ class GeodataApiTests(TestCase):
         self.assertEqual(self.client.get("/api/addressing/streets/").status_code, 200)
         self.assertIn(self.client.get("/api/addressing/address-references/").status_code, (401, 403))
 
+    def test_autocomplete_requires_authentication_and_scopes_streets(self):
+        unauthenticated = self.client.get(
+            "/api/addressing/autocomplete/",
+            {"kind": "street", "q": "ru", "city_id": self.city.id},
+        )
+        self.assertEqual(unauthenticated.status_code, 401)
+
+        neighborhood = Neighborhood.objects.create(
+            name="Centro", city=self.city.name, city_ref=self.city
+        )
+        StreetNeighborhood.objects.create(
+            street=self.street, neighborhood=neighborhood
+        )
+        duplicate_axis = Street.objects.create(
+            city=self.city,
+            dataset=self.dataset,
+            source_record_id="r2",
+            name="Rua A",
+            normalized_name="rua a",
+        )
+        StreetNeighborhood.objects.create(
+            street=duplicate_axis, neighborhood=neighborhood
+        )
+        other_city = City.objects.create(name="Outra Cidade")
+        other_dataset = GeodataDataset.objects.create(
+            city=other_city,
+            kind="street",
+            authority="Prefeitura",
+            title="Outras ruas",
+            source_url="https://example.test/outras-ruas",
+            license_name="Licença oficial",
+            source_version="1",
+            retrieved_at=timezone.now(),
+            sha256="f" * 64,
+            source_crs="EPSG:4326",
+            status="active",
+        )
+        Street.objects.create(
+            city=other_city,
+            dataset=other_dataset,
+            source_record_id="other-r1",
+            name="Rua de outra cidade",
+            normalized_name="rua de outra cidade",
+        )
+        user = get_user_model().objects.create_user(
+            username="autocomplete", email="autocomplete@example.test", password="secret-test"
+        )
+        self.client.force_authenticate(user)
+        response = self.client.get(
+            "/api/addressing/autocomplete/",
+            {
+                "kind": "street",
+                "q": "RÚA",
+                "city_id": self.city.id,
+                "neighborhood_id": neighborhood.id,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["name"], "Rua A")
+
+    def test_address_autocomplete_validates_scope_and_limits_results(self):
+        neighborhood = Neighborhood.objects.create(
+            name="Centro", city=self.city.name, city_ref=self.city
+        )
+        StreetNeighborhood.objects.create(
+            street=self.street, neighborhood=neighborhood
+        )
+        for index in range(21):
+            AddressReference.objects.create(
+                city=self.city,
+                neighborhood=neighborhood,
+                street=self.street,
+                dataset=self.dataset,
+                source_record_id=f"address-{index}",
+                street_name="Rua A",
+                number=str(100 + index),
+                zipcode="89200-000",
+                location=Point(.5, .5, srid=4326),
+            )
+        user = get_user_model().objects.create_user(
+            username="address-autocomplete",
+            email="address-autocomplete@example.test",
+            password="secret-test",
+        )
+        self.client.force_authenticate(user)
+        response = self.client.get(
+            "/api/addressing/autocomplete/",
+            {
+                "kind": "address",
+                "q": "Rua",
+                "city_id": self.city.id,
+                "neighborhood_id": neighborhood.id,
+                "street_id": self.street.id,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 20)
+        self.assertEqual(len(response.data["results"]), 20)
+        self.assertTrue(
+            all(item["street_id"] == str(self.street.id) for item in response.data["results"])
+        )
+
+        other_city = City.objects.create(name="Cidade incompatível")
+        invalid = self.client.get(
+            "/api/addressing/autocomplete/",
+            {
+                "kind": "address",
+                "q": "Rua",
+                "city_id": other_city.id,
+                "street_id": self.street.id,
+            },
+        )
+        self.assertEqual(invalid.status_code, 400)
+        self.assertEqual(invalid.data["error"]["code"], "invalid_filter")
+
+    def test_address_autocomplete_matches_an_equivalent_road_axis(self):
+        equivalent_axis = Street.objects.create(
+            city=self.city,
+            dataset=self.dataset,
+            source_record_id="r-equivalent",
+            name="Rua A",
+            normalized_name="rua a",
+        )
+        AddressReference.objects.create(
+            city=self.city,
+            street=self.street,
+            dataset=self.dataset,
+            source_record_id="address-equivalent",
+            street_name="Rua A",
+            number="42",
+            location=Point(.5, .5, srid=4326),
+        )
+        user = get_user_model().objects.create_user(
+            username="equivalent-axis",
+            email="equivalent-axis@example.test",
+            password="secret-test",
+        )
+        self.client.force_authenticate(user)
+        response = self.client.get(
+            "/api/addressing/autocomplete/",
+            {
+                "kind": "address",
+                "q": "42",
+                "city_id": self.city.id,
+                "street_id": equivalent_axis.id,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["number"], "42")
+
     def test_resolve_returns_covering_neighborhood(self):
         neighborhood_dataset = GeodataDataset.objects.create(city=self.city, kind="neighborhood_boundary", authority="Prefeitura", title="Bairros", source_url="https://example.test/bairros", license_name="Licença oficial", source_version="1", retrieved_at=timezone.now(), sha256="b" * 64, source_crs="EPSG:4326", status="active")
         Neighborhood.objects.create(name="Centro", city=self.city.name, city_ref=self.city, dataset=neighborhood_dataset, source_record_id="b1", geometry=MultiPolygon(Polygon(((0, 0), (1, 0), (1, 1), (0, 1), (0, 0))), srid=4326))
