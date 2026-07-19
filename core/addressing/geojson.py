@@ -27,6 +27,10 @@ def validate_territory_geometry(value: Any) -> dict:
 def point_inside_geometry(longitude: float, latitude: float, geometry: dict | None) -> bool | None:
     if geometry is None:
         return None
+    # GeoDjango entrega GEOSGeometry diretamente nas views; normalize para o
+    # mesmo GeoJSON usado pelos endpoints e pela validação Shapely.
+    if hasattr(geometry, "geojson"):
+        geometry = json.loads(geometry.geojson)
     validate_territory_geometry(geometry)
     return bool(shape(geometry).covers(Point(float(longitude), float(latitude))))
 

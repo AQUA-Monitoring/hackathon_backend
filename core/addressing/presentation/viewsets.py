@@ -541,7 +541,7 @@ class AddressingViewSet(viewsets.ViewSet):
         else:
             address_qs = address_qs.none()
         address = address_qs.annotate(distance=Distance("location", point)).order_by("distance").first()
-        return Response({"crs": "EPSG:4326", "city": {"id": str(city_id), "name": neighborhood.city_ref.name if neighborhood and neighborhood.city_ref else city.name} if city_id else None, "neighborhood": {"id": str(neighborhood.id), "name": neighborhood.name} if neighborhood else None, "region": {"id": str(neighborhood.region_id), "name": neighborhood.region.name} if neighborhood and neighborhood.region_id else None, "nearest_address": {"id": str(address.id), "street": address.street_name, "number": address.number, "distance": address.distance.m, "match_type": "nearest"} if address else None})
+        return Response({"crs": "EPSG:4326", "city": {"id": str(city_id), "name": neighborhood.city_ref.name if neighborhood and neighborhood.city_ref else city.name} if city_id else None, "neighborhood": {"id": str(neighborhood.id), "name": neighborhood.name} if neighborhood else None, "region": {"id": str(neighborhood.region_id), "name": neighborhood.region.name} if neighborhood and neighborhood.region_id else None, "nearest_address": {"id": str(address.id), "street": address.street_name, "number": address.number, "distance": address.distance.m, "match_type": "nearest", "neighborhood_id": str(address.neighborhood_id) if address and address.neighborhood_id else None, "street_id": str(address.street_id) if address and address.street_id else None, "address_reference_id": str(address.id) if address else None} if address else None})
 
     @action(detail=False, methods=["post"], url_path="resolve-area")
     def resolve_area(self, request):

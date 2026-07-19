@@ -530,16 +530,10 @@ class CameraMetadataViewSet(SafeOrderingMixin, viewsets.ViewSet):
                 address_reference.neighborhood_id
                 and address_reference.neighborhood_id != neighborhood.id
             ):
-                return Response(
-                    {
-                        "address": {
-                            "address_reference_id": [
-                                "A referência de endereço não pertence ao bairro informado."
-                            ]
-                        }
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+                # A referência canônica é mais específica que o bairro
+                # inferido pelo ponto. A cidade já foi validada acima; usar o
+                # bairro da referência evita rejeição por divergência cadastral.
+                neighborhood = address_reference.neighborhood
             reference_street = address_reference.street
             if reference_street and (
                 reference_street.city_id != city.id
