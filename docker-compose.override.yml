@@ -7,6 +7,7 @@ services:
       FLOOD_CAMERA_API_MODE: proxy
       FLOOD_CAMERA_DEDICATED_QUEUE: "1"
       DEMO_ENABLED: "1"
+      POSTGRES_PORT: "5432"
     healthcheck:
       test:
         [
@@ -46,6 +47,7 @@ services:
       FLOOD_CAMERA_API_MODE: proxy
       FLOOD_CAMERA_DEDICATED_QUEUE: "1"
       DEMO_ENABLED: "1"
+      POSTGRES_PORT: "5432"
     volumes:
       - .:/app
       - media:/app/media
@@ -58,6 +60,7 @@ services:
       FLOOD_CAMERA_API_MODE: proxy
       FLOOD_CAMERA_DEDICATED_QUEUE: "1"
       DEMO_ENABLED: "1"
+      POSTGRES_PORT: "5432"
     volumes:
       - .:/app
       - media:/app/media
@@ -68,6 +71,7 @@ services:
     environment:
       DEMO_SCENARIO_PATH: /demo-assets/scenario.json
       DEMO_STREAM_MEDIA_INTERNAL_BASE_URL: http://demo-stream:8088
+      POSTGRES_PORT: "5432"
     volumes:
       - ./demo_assets/scenario.json:/demo-assets/scenario.json:ro
     healthcheck:
@@ -88,6 +92,7 @@ services:
       FLOOD_CAMERA_API_MODE: direct
       FLOOD_CAMERA_DEDICATED_QUEUE: "1"
       DEMO_ENABLED: "1"
+      POSTGRES_PORT: "5432"
     depends_on:
       redis:
         condition: service_healthy
@@ -139,6 +144,7 @@ services:
       FLOOD_CAMERA_API_MODE: direct
       FLOOD_CAMERA_DEDICATED_QUEUE: "1"
       DEMO_ENABLED: "1"
+      POSTGRES_PORT: "5432"
     depends_on:
       redis:
         condition: service_healthy

@@ -5,18 +5,18 @@ from unittest.mock import Mock, patch
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from core.flood_camera_monitoring.application.operational_snapshot import (
+from core.flood_camera_monitoring.services.operational_snapshot import (
     begin_analysis,
     begin_capture,
     mark_stream_online,
 )
-from core.flood_camera_monitoring.application.use_cases.analyze_all_cameras import (
+from core.flood_camera_monitoring.services.analyze import (
     AnalyzeAllCamerasService,
 )
-from core.flood_camera_monitoring.application.use_cases.predict_all_cameras import (
+from core.flood_camera_monitoring.services.predict import (
     PredictAllCamerasService,
 )
-from core.flood_camera_monitoring.application.utils.model_artifact import (
+from core.flood_camera_monitoring.services.model_artifact import (
     ModelArtifactInfo,
 )
 from core.flood_camera_monitoring.infra.models import (
@@ -206,8 +206,7 @@ class CameraOperationalSnapshotTests(TestCase):
         self.assert_invalid_result(snapshot)
 
     @patch(
-        "core.flood_camera_monitoring.application.use_cases."
-        "analyze_all_cameras.aggregate_predictions"
+        "core.flood_camera_monitoring.services.analyze.aggregate_predictions"
     )
     def test_success_persists_available_snapshot(self, aggregate_predictions):
         aggregate_predictions.return_value = (
@@ -245,8 +244,7 @@ class CameraOperationalSnapshotTests(TestCase):
         self.assertEqual(data[0]["probabilities"]["normal"], 80.0)
 
     @patch(
-        "core.flood_camera_monitoring.application.use_cases."
-        "analyze_all_cameras.aggregate_predictions",
+        "core.flood_camera_monitoring.services.analyze.aggregate_predictions",
         side_effect=RuntimeError("inference failed"),
     )
     def test_inference_error_clears_previous_values(self, _aggregate_predictions):

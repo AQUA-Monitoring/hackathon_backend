@@ -9,13 +9,13 @@ from typing import Any, Callable
 from django.core.files.base import ContentFile
 from django.db import transaction
 
-from core.flood_camera_monitoring.adapters.gateways.opencv_stream_adapter import (
+from core.flood_camera_monitoring.infra.opencv_stream import (
     OpenCVVideoStream,
 )
-from core.flood_camera_monitoring.adapters.gateways.torch_classifier_adapter import (
+from core.flood_camera_monitoring.infra.torch_classifier import (
     TorchFloodClassifier,
 )
-from core.flood_camera_monitoring.application.operational_snapshot import (
+from core.flood_camera_monitoring.services.operational_snapshot import (
     begin_analysis,
     begin_capture,
     get_or_create_operational_snapshot,
@@ -26,11 +26,11 @@ from core.flood_camera_monitoring.application.operational_snapshot import (
     mark_stream_online,
     snapshot_prediction_payload,
 )
-from core.flood_camera_monitoring.application.utils.evaluation import (
+from core.flood_camera_monitoring.services.evaluation import (
     EvalConfig,
     aggregate_predictions,
 )
-from core.flood_camera_monitoring.application.utils.model_artifact import (
+from core.flood_camera_monitoring.services.model_artifact import (
     ModelArtifactInfo,
     inspect_model_artifact,
 )

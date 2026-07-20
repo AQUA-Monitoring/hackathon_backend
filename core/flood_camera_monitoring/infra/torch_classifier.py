@@ -20,13 +20,12 @@ import torchvision.transforms as T
 import torchvision.models as tv_models
 from PIL import Image
 
-from core.flood_camera_monitoring.domain.entities import (
+from core.flood_camera_monitoring.services.stream_prediction import (
     FloodAssessment,
     FloodProbabilities,
     ImageInput,
     FloodSeverity,
 )
-from core.flood_camera_monitoring.domain.repository import FloodClassifierPort
 
 
 def _to_pil(image: ImageInput) -> Image.Image:
@@ -38,7 +37,7 @@ def _to_pil(image: ImageInput) -> Image.Image:
 
 
 @dataclass
-class TorchFloodClassifier(FloodClassifierPort):
+class TorchFloodClassifier:
     checkpoint_path: Union[str, Path]
     device: Union[str, torch.device] = "cpu"
 
@@ -321,6 +320,7 @@ class TorchFloodClassifier(FloodClassifierPort):
         else:
             severity = FloodSeverity.NORMAL
         return FloodAssessment(
+            meta={},
             confidence=confidence,
             is_flooded=is_flooded,
             severity=severity,

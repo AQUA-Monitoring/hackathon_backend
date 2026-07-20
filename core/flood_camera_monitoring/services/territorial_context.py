@@ -7,7 +7,7 @@ from django.contrib.gis.geos import Point
 from django.contrib.gis.measure import D
 from django.contrib.gis.db.models.functions import Distance
 
-from core.addressing.application.territory import TerritoryResolver
+from core.addressing.services import TerritoryResolver
 from core.addressing.models import AddressReference, RoadAxisSegment
 
 

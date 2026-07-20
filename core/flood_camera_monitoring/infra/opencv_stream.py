@@ -6,11 +6,11 @@ from pathlib import Path
 from django.conf import settings
 import cv2  # type: ignore
 
-from core.flood_camera_monitoring.domain.repository import VideoStreamPort
+from core.flood_camera_monitoring.services.stream_prediction import VideoStream
 
 
 @dataclass
-class OpenCVVideoStream(VideoStreamPort):
+class OpenCVVideoStream(VideoStream):
     url: str
     backend: int = cv2.CAP_FFMPEG
 

@@ -10,7 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.common.cache import cache_get_json, cache_set_json
-from core.flood_camera_monitoring.application.utils.evaluation import (
+from core.flood_camera_monitoring.services.evaluation import (
     EvalConfig,
     aggregate_predictions,
     capture_frames,
@@ -25,8 +25,10 @@ from core.flood_camera_monitoring.infra.torch_flood_classifier import (
     get_default_classifier,
 )
 from core.flood_camera_monitoring.infra.utils import resolve_checkpoint_path
-from core.flood_camera_monitoring.presentation.serializers import DemoStateSerializer
-from core.users.permissions import IsAppAdmin
+from core.flood_camera_monitoring.presentation.demo_control_views import (
+    DemoStateView as BaseDemoStateView,
+    DemoStatusView as BaseDemoStatusView,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -75,59 +77,16 @@ def _store_cache(key: str, payload: dict[str, Any]) -> None:
         logger.warning("Could not cache demo prediction", exc_info=True)
 
 
-class DemoStatusView(APIView):
-    permission_classes = [permissions.AllowAny]
+class DemoStatusView(BaseDemoStatusView):
+    """Full-service status preserving the DEMO_ENABLED contract."""
 
-    def get(self, request, *args, **kwargs):
-        if not _enabled():
-            return Response({"enabled": False, "status": "disabled"})
-        try:
-            payload = _client().get_state()
-        except DemoStreamUnavailable as exc:
-            return Response(
-                {"enabled": True, "status": "unavailable", "detail": str(exc)},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-        return Response({"enabled": True, **_public_payload(payload)})
+    require_enabled = True
 
 
-class DemoStateView(APIView):
-    permission_classes = [permissions.IsAuthenticated, IsAppAdmin]
+class DemoStateView(BaseDemoStateView):
+    """Full-service control preserving the DEMO_ENABLED contract."""
 
-    def post(self, request, *args, **kwargs):
-        if not _enabled():
-            return Response(
-                {"detail": "Demo stream is disabled"},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-        serializer = DemoStateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        requested_state = serializer.validated_data["state"]
-        client = _client()
-        try:
-            previous = client.get_state()
-            available_states = previous.get("available_states", [])
-            if requested_state not in available_states:
-                return Response(
-                    {
-                        "detail": f"State '{requested_state}' is not available in this scenario",
-                        "available_states": available_states,
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            payload = client.set_state(requested_state)
-        except DemoStreamUnavailable as exc:
-            return Response(
-                {"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE
-            )
-        logger.info(
-            "Demo state changed user_id=%s previous=%s current=%s session_id=%s",
-            getattr(request.user, "id", None),
-            previous.get("demo_state"),
-            payload.get("demo_state"),
-            payload.get("session_id"),
-        )
-        return Response({"enabled": True, **_public_payload(payload)})
+    require_enabled = True
 
 
 class DemoPredictView(APIView):

@@ -1,4 +1,4 @@
-"""Serviço canônico de resolução territorial.
+"""Serviços canônicos de resolução territorial.
 
 O serviço trabalha somente com geometrias persistidas e ativas. Ele não
 geocodifica, não consulta fontes externas e não inventa um território quando a

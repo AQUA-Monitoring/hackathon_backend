@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Any
 
-from core.flood_camera_monitoring.application.operational_snapshot import (
+from core.flood_camera_monitoring.services.operational_snapshot import (
     snapshot_prediction_payload,
 )
 from core.flood_camera_monitoring.infra.models import (

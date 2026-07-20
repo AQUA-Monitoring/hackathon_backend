@@ -16,7 +16,7 @@ from rest_framework.decorators import action
 from django.db.models import Q
 from uuid import UUID
 
-from core.addressing.application.territory import TerritoryResolutionError, TerritoryResolver, parse_geometry
+from core.addressing.services import TerritoryResolutionError, TerritoryResolver, parse_geometry
 from core.addressing.models import AddressReference, City, GeodataDataset, Region, Neighborhood, RoadAxisSegment, Street
 from core.addressing.geojson import feature_collection
 from core.users.infra.models import User

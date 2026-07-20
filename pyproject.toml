@@ -18,7 +18,7 @@ dependencies = [
     "torchvision>=0.23.0",
     "requests>=2.31.0",
     "opencv-python-headless>=4.8.0.76",
-    "pillow>=10.0.0",
+    "pillow>=10.0.0,<13.0.0",
     "tqdm>=4.64.0",
     "matplotlib>=3.5.0",
     "seaborn>=0.11.0",
@@ -31,14 +31,11 @@ dependencies = [
     "pyproj>=3.5.0",
     "rtree>=1.0.0",
     "nvidia-cublas-cu12>=12.8.4.1",
-    "opencv-python>=4.12.0.88",
     "mercadopago>=2.3.0",
     "django-cors-headers>=4.9.0",
     "dj-database-url>=3.1.2",
     "psycopg>=3.3.4",
-    "psycopg2-binary>=2.9.12",
     "python-magic>=0.4.27",
-    "Pillow>=12.2.0",
 ]
 requires-python = "==3.13.*"
 readme = "README.md"

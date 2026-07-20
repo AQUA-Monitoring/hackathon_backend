@@ -5,7 +5,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from rest_framework import serializers
 
-from core.flood_camera_monitoring.application.operational_snapshot import (
+from core.flood_camera_monitoring.services.operational_snapshot import (
     snapshot_prediction_payload,
     snapshot_stale_seconds,
 )

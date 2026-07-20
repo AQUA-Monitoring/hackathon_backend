@@ -52,7 +52,7 @@ class DemoApiTests(APITestCase):
             type=User.UserType.STANDARD,
         )
 
-    @patch("core.flood_camera_monitoring.presentation.demo_views._client")
+    @patch("core.flood_camera_monitoring.presentation.demo_control_views._client")
     def test_status_is_public_and_hides_internal_segment_url(self, client_factory):
         client_factory.return_value.get_state.return_value = stream_payload()
 
@@ -61,6 +61,15 @@ class DemoApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data["enabled"])
         self.assertNotIn("internal_url", response.data["segment"])
+
+    @override_settings(DEMO_ENABLED=False)
+    @patch("core.flood_camera_monitoring.presentation.demo_control_views._client")
+    def test_disabled_demo_status_does_not_call_sidecar(self, client_factory):
+        response = self.client.get("/api/flood_monitoring/demo")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data, {"enabled": False, "status": "disabled"})
+        client_factory.assert_not_called()
 
     def test_anonymous_user_cannot_change_state(self):
         response = self.client.post(
@@ -75,7 +84,7 @@ class DemoApiTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
-    @patch("core.flood_camera_monitoring.presentation.demo_views._client")
+    @patch("core.flood_camera_monitoring.presentation.demo_control_views._client")
     def test_admin_changes_state_and_receives_new_session(self, client_factory):
         sidecar = client_factory.return_value
         sidecar.get_state.return_value = stream_payload(session_id="old-session")
@@ -93,6 +102,36 @@ class DemoApiTests(APITestCase):
         self.assertEqual(response.data["demo_state"], "normal")
         sidecar.set_state.assert_called_once_with("normal")
 
+    @override_settings(DEMO_ENABLED=False)
+    @patch("core.flood_camera_monitoring.presentation.demo_control_views._client")
+    def test_disabled_demo_rejects_admin_state_change(self, client_factory):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.post(
+            "/api/flood_monitoring/demo/state", {"state": "normal"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        self.assertEqual(response.data["detail"], "Demo stream is disabled")
+        client_factory.assert_not_called()
+
+    @patch("core.flood_camera_monitoring.presentation.demo_control_views.logger")
+    @patch("core.flood_camera_monitoring.presentation.demo_control_views._client")
+    def test_admin_state_change_is_audited(self, client_factory, logger):
+        sidecar = client_factory.return_value
+        sidecar.get_state.return_value = stream_payload(session_id="old-session")
+        sidecar.set_state.return_value = stream_payload(
+            state="normal", session_id="new-session"
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.post(
+            "/api/flood_monitoring/demo/state", {"state": "normal"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        logger.info.assert_called_once()
+
     def test_invalid_state_is_rejected_before_sidecar_call(self):
         self.client.force_authenticate(self.admin)
         response = self.client.post(
@@ -100,7 +139,7 @@ class DemoApiTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-    @patch("core.flood_camera_monitoring.presentation.demo_views._client")
+    @patch("core.flood_camera_monitoring.presentation.demo_control_views._client")
     def test_admin_cannot_select_a_phase_missing_from_scenario(self, client_factory):
         payload = stream_payload()
         payload["available_states"] = ["auto", "flooded"]
@@ -114,7 +153,7 @@ class DemoApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         client_factory.return_value.set_state.assert_not_called()
 
-    @patch("core.flood_camera_monitoring.presentation.demo_views._client")
+    @patch("core.flood_camera_monitoring.presentation.demo_control_views._client")
     def test_sidecar_unavailable_returns_503(self, client_factory):
         client_factory.return_value.get_state.side_effect = DemoStreamUnavailable("down")
 

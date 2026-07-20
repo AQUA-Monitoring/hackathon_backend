@@ -7,11 +7,9 @@ from core.flood_camera_monitoring.presentation.demo_views import (
     DemoStateView,
     DemoStatusView,
 )
-from core.flood_camera_monitoring.presentation.viewsets import (
-    CameraMetadataViewSet,
-    FloodMonitoringViewSet,
-    HealthcheckView,
-)
+from core.flood_camera_monitoring.presentation.camera_views import CameraMetadataViewSet
+from core.flood_camera_monitoring.presentation.health_views import HealthcheckView
+from core.flood_camera_monitoring.presentation.monitoring_views import FloodMonitoringViewSet
 
 
 urlpatterns = [

@@ -6,7 +6,7 @@ from django.db import models, transaction
 from uuid import UUID
 import json
 
-from core.addressing.application.territory import (
+from core.addressing.services import (
     TerritoryResolutionError,
     TerritoryResolver,
     parse_geometry,

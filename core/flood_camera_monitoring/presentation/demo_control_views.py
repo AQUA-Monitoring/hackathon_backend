@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
+from django.conf import settings
 from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -14,6 +16,9 @@ from core.flood_camera_monitoring.infra.demo_stream_client import (
 )
 from core.flood_camera_monitoring.presentation.serializers import DemoStateSerializer
 from core.users.permissions import IsAppAdmin
+
+
+logger = logging.getLogger(__name__)
 
 
 def _client() -> DemoStreamClient:
@@ -32,14 +37,17 @@ def _public_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 class DemoStatusView(APIView):
     permission_classes = [permissions.AllowAny]
+    require_enabled = False
 
     def get(self, request, *args, **kwargs):
+        if self.require_enabled and not settings.DEMO_ENABLED:
+            return Response({"enabled": False, "status": "disabled"})
         try:
             payload = _client().get_state()
         except DemoStreamUnavailable as exc:
             return Response(
                 {
-                    "enabled": False,
+                    "enabled": bool(self.require_enabled),
                     "status": "unavailable",
                     "detail": str(exc),
                 },
@@ -50,8 +58,14 @@ class DemoStatusView(APIView):
 
 class DemoStateView(APIView):
     permission_classes = [permissions.IsAuthenticated, IsAppAdmin]
+    require_enabled = False
 
     def post(self, request, *args, **kwargs):
+        if self.require_enabled and not settings.DEMO_ENABLED:
+            return Response(
+                {"detail": "Demo stream is disabled"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         serializer = DemoStateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         requested_state = serializer.validated_data["state"]
@@ -72,4 +86,11 @@ class DemoStateView(APIView):
             return Response(
                 {"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
+        logger.info(
+            "Demo state changed user_id=%s previous=%s current=%s session_id=%s",
+            getattr(request.user, "id", None),
+            previous.get("demo_state"),
+            payload.get("demo_state"),
+            payload.get("session_id"),
+        )
         return Response({"enabled": True, **_public_payload(payload)})

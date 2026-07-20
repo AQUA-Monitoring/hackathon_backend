@@ -401,7 +401,7 @@ class CameraMetadataApiTests(APITestCase):
         )
         classifier_module.build_default_classifier = classifier_factory
         stream_module = ModuleType(
-            "core.flood_camera_monitoring.adapters.gateways.opencv_stream_adapter"
+            "core.flood_camera_monitoring.infra.opencv_stream"
         )
         stream_module.OpenCVVideoStream = stream_factory
 

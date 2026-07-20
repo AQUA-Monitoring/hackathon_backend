@@ -5,11 +5,11 @@ import os
 import time
 from typing import List, Tuple, Dict, Any
 
-from core.flood_camera_monitoring.adapters.gateways.opencv_stream_adapter import (
+from core.flood_camera_monitoring.infra.opencv_stream import (
     OpenCVVideoStream,
 )
-from core.flood_camera_monitoring.application.dto.predict_response import (
-    PredictResponse,
+from core.flood_camera_monitoring.services.stream_prediction import (
+    PredictionResult,
 )
 
 
@@ -72,12 +72,12 @@ def aggregate_predictions(
     frames: List[bytes],
     classifier,
     cfg: EvalConfig,
-) -> Tuple[Dict[str, Any], List[PredictResponse]]:
+) -> Tuple[Dict[str, Any], List[PredictionResult]]:
     """Run classifier on frames and compute aggregated metrics and flags.
 
     Returns: (summary_dict, assessments)
     """
-    assessments: list[PredictResponse] = []
+    assessments: list[PredictionResult] = []
     best_idx = 0
     best_flooded = -1.0
     flooded_series: list[float] = []

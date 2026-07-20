@@ -14,7 +14,10 @@ from rest_framework.response import Response
 from core.addressing.models import City, GeodataDataset
 from core.flood_impact.models import FloodSpatialEvent, FloodSpatialEventRevision, RoadFloodImpact, RoadFloodImpactRun, RoadImpactHotspot
 from core.flood_impact.services import PostGISRoadImpactService, affected_territory_snapshot
-from core.flood_camera_monitoring.application.nearby_cameras import camera_coordinates, haversine_distance_m
+from core.flood_camera_monitoring.services.nearby import (
+    camera_coordinates,
+    haversine_distance_m,
+)
 from core.flood_camera_monitoring.infra.models import Camera
 
 

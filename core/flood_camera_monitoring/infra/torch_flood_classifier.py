@@ -1,8 +1,4 @@
-"""Infra wrapper exposing the Torch-based Flood Classifier.
-
-This keeps backward compatibility for scripts importing from infra while the
-implementation lives in adapters/gateways, following clean architecture.
-"""
+"""Factory for the Torch classifier implementation kept in infrastructure."""
 
 from pathlib import Path
 from typing import Union
@@ -13,7 +9,7 @@ from core.flood_camera_monitoring.infra.utils import (
     looks_like_lfs_pointer,
 )
 
-from core.flood_camera_monitoring.adapters.gateways.torch_classifier_adapter import (
+from core.flood_camera_monitoring.infra.torch_classifier import (
     TorchFloodClassifier as TorchFloodClassifier,
 )
 
