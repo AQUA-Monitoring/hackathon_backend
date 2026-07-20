@@ -26,5 +26,9 @@ def cache_get_json(key: str) -> Optional[Any]:
         return None
 
 
+def cache_delete(key: str) -> None:
+    get_redis().delete(key)
+
+
 def now_ts() -> float:
     return time.time()

@@ -9,7 +9,7 @@ from core.flood_camera_monitoring.services.operational_snapshot import (
     snapshot_prediction_payload,
     snapshot_stale_seconds,
 )
-from core.flood_camera_monitoring.infra.models import CameraOperationalSnapshot
+from core.flood_camera_monitoring.infra.models import Camera, CameraOperationalSnapshot
 
 
 def operational_stale_after_seconds() -> int:
@@ -67,6 +67,25 @@ class CameraCreateSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
         if urlsplit(normalized).scheme not in {"http", "https"}:
             raise serializers.ValidationError("Use uma URL HTTP ou HTTPS.")
         return normalized
+
+
+class CameraUpdateSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
+    """Campos mutáveis da câmera, exclusivos da administração."""
+
+    description = serializers.CharField(max_length=255, required=False, allow_blank=False)
+    video_hls = serializers.URLField(max_length=512, required=False, allow_blank=False)
+    video_embed = serializers.URLField(max_length=512, required=False, allow_blank=True, allow_null=True)
+    status = serializers.ChoiceField(choices=Camera.CameraStatus.names, required=False)
+    address = CameraAddressInputSerializer(required=False)
+
+    def validate_video_hls(self, value: str) -> str:
+        normalized = normalize_hls_url(value)
+        if urlsplit(normalized).scheme not in {"http", "https"}:
+            raise serializers.ValidationError("Use uma URL HTTP ou HTTPS.")
+        return normalized
+
+    def validate_status(self, value: str) -> int:
+        return Camera.CameraStatus[value].value
 
 
 class NearbyCamerasQuerySerializer(serializers.Serializer):
@@ -304,7 +323,7 @@ class CameraReadSerializer(serializers.Serializer):
         field intact for clients that need the full camera inspection route.
         Inactive cameras never receive a playable preview.
         """
-        if camera.status != camera.CameraStatus.ACTIVE:
+        if camera.status == camera.CameraStatus.INACTIVE:
             return None
         return camera.video_hls or None
 

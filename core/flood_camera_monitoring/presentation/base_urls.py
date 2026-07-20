@@ -22,7 +22,7 @@ urlpatterns = [
     ),
     path(
         "cameras/<uuid:pk>/",
-        CameraMetadataViewSet.as_view({"get": "retrieve"}),
+        CameraMetadataViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update"}),
         name="cameras-detail",
     ),
     path(
