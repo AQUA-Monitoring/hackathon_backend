@@ -15,6 +15,12 @@ def active_flood_points(*, at=None):
 @transaction.atomic
 def sync_legacy_spatial_event(flood_point, *, author=None):
     """Cria uma revisão canônica sem alterar a semântica do registro legado."""
+    valid_until = flood_point.finished_at
+    invalid_finished_at = bool(
+        valid_until is not None and valid_until <= flood_point.created_at
+    )
+    if invalid_finished_at:
+        valid_until = None
     event, _ = FloodSpatialEvent.objects.select_for_update().get_or_create(
         source_type="legacy_flood_point",
         source_id=str(flood_point.pk),
@@ -40,7 +46,7 @@ def sync_legacy_spatial_event(flood_point, *, author=None):
         footprint=flood_point.footprint,
         confidence=flood_point.possibility,
         valid_from=flood_point.created_at,
-        valid_until=flood_point.finished_at,
+        valid_until=valid_until,
         geometry_method=(
             FloodSpatialEventRevision.GeometryMethod.PROVIDED
             if flood_point.location or flood_point.footprint
@@ -53,6 +59,12 @@ def sync_legacy_spatial_event(flood_point, *, author=None):
             "legacy_props": flood_point.props,
             "territory_resolution": flood_point.territory_resolution,
             "neighborhood_id": str(flood_point.neighborhood_id),
+            "legacy_finished_at_invalid": invalid_finished_at,
+            "legacy_finished_at": (
+                flood_point.finished_at.isoformat()
+                if flood_point.finished_at is not None
+                else None
+            ),
         },
         author=author if getattr(author, "is_authenticated", False) else None,
         justification="Snapshot criado pelo adaptador do cadastro legado.",

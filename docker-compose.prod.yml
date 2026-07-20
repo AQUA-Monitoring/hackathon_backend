@@ -53,7 +53,7 @@ services:
       DEMO_SCENARIO_PATH: /demo-assets/scenario.json
       DEMO_STREAM_MEDIA_INTERNAL_BASE_URL: http://demo-stream:8088
     ports:
-      - "${DEMO_STREAM_PORT:-8088}:8088"
+      - "${DEMO_STREAM_PORT:-8188}:8088"
     restart: unless-stopped
 
   redis:

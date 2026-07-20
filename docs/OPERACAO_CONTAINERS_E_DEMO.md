@@ -51,7 +51,7 @@ produção:
 | web | 8001 | 8000 | /health/ verifica somente DB e Redis |
 | db | 5434 | 5433 | pg_isready |
 | redis | não publicada | não publicada | redis-cli ping |
-| demo-stream HLS | 8088 quando o perfil demo está ativo | 8088, padrão | /health na porta interna 8089 |
+| demo-stream HLS | 8188 em produção (8088 internamente) | 8188 em produção | /health na porta interna 8089 |
 | flood-api | interna | incorporada ao web full | /health interno |
 
 Os healthchecks do override de desenvolvimento executam uma verificação inicial
