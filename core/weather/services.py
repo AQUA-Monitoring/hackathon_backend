@@ -1,14 +1,12 @@
-from core.weather.domain.repository import WeatherRepository
 from core.weather.infra.models import Weather
 from core.weather.infra.services.weather import fillClimate as fillClimateService, fillElevation, fillFutureClimate, fillFlood
-import pandas as pd
 from datetime import date, timedelta
 
 today = date.today()
 forecast_start = today - timedelta(days=3)
 forecast_end = today + timedelta(days=7)
 
-class WeatherRepositoryImpl(WeatherRepository):
+class WeatherRepositoryImpl:
     def fillAll(self, lat, lon, neighborhood, start, end):
         weather = self.fillWeather(lat, lon, start, min(end, today))
         future = self.fillFutureWeather(lat, lon)
@@ -64,3 +62,19 @@ class WeatherRepositoryImpl(WeatherRepository):
 
     def fillElevation(self, lat, lon):
         return fillElevation(lat, lon)
+
+
+class WeatherService:
+    def __init__(self, repository: WeatherRepositoryImpl):
+        self.repository = repository
+
+    def execute(self, lat: float, lon: float, neighborhood: str, start: str, end: str):
+        all_weather = self.repository.fillAll(lat, lon, neighborhood, start, end)
+        return {
+            "days": all_weather["days"],
+            "rain": all_weather["rain"],
+            "temperature": all_weather["temp"],
+            "humidity": all_weather["humidity"],
+            "pressure": all_weather["pressure"],
+            "elevation": all_weather["elevation"],
+        }

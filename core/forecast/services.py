@@ -1,5 +1,5 @@
-from core.forecast.domain.repository import MachineLearningRepository
 from core.forecast.infra.models import Forecast
+from core.weather.infra.models import Weather
 from core.occurrences.infra.models import Occurrence
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
@@ -9,7 +9,28 @@ from imblearn.over_sampling import SMOTE
 
 import pandas as pd
 
-def runForecast(repo: MachineLearningRepository): # Aqui é onde realmente acontece a previsão com IA
+class ForecastRepoImpl:
+    def getCoords(self):
+        return Weather.objects.values("latitude", "longitude").distinct()
+
+    def getWeatherByCoord(self, lat, lon):
+        return Weather.objects.filter(latitude=lat, longitude=lon)
+
+    def forecast(self, lat, lon, flood, date, probability):
+        Forecast.objects.update_or_create(
+            latitude=lat,
+            longitude=lon,
+            flood=flood,
+            date=date,
+            probability=probability,
+        )
+
+
+def floodingPredict(repo):
+    runForecast(repo)
+
+
+def runForecast(repo): # Aqui é onde realmente acontece a previsão com IA
     # Treinamento
     occurrence_qs = Occurrence.objects.all().values("date", "neighborhood")
     occurrences = pd.DataFrame(list(occurrence_qs))

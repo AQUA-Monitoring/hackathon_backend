@@ -1,6 +1,5 @@
 from celery import shared_task
-from core.weather.app.services import WeatherService
-from core.weather.infra.repository import WeatherRepositoryImpl
+from core.weather.services import WeatherRepositoryImpl, WeatherService
 
 @shared_task
 def fillWeather(lat, lon, neighborhood, start, end):

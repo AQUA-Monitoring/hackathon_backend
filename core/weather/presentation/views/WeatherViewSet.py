@@ -4,8 +4,7 @@ from core.weather.infra.models import Weather
 from core.weather.presentation.serializers.WeatherModelSerializer import (
     WeatherModelSerializer,
 )
-from core.weather.app.services import WeatherService
-from core.weather.infra.repository import WeatherRepositoryImpl
+from core.weather.services import WeatherRepositoryImpl, WeatherService
 from rest_framework.response import Response
 from datetime import datetime
 
