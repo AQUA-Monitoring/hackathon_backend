@@ -23,6 +23,8 @@ services:
       start_period: 30s
     ports:
       - "${WEB_PORT:-8090}:8090"
+    volumes:
+      - model:/app/core/flood_camera_monitoring/infra/machine_model
     restart: unless-stopped
 
   worker:
@@ -32,6 +34,8 @@ services:
       FLOOD_CAMERA_API_MODE: direct
       FLOOD_CAMERA_DEDICATED_QUEUE: "0"
       DEMO_ENABLED: "1"
+    volumes:
+      - model:/app/core/flood_camera_monitoring/infra/machine_model
     restart: unless-stopped
 
   beat:
@@ -42,6 +46,8 @@ services:
       FLOOD_CAMERA_API_MODE: direct
       FLOOD_CAMERA_DEDICATED_QUEUE: "0"
       DEMO_ENABLED: "1"
+    volumes:
+      - model:/app/core/flood_camera_monitoring/infra/machine_model
     restart: unless-stopped
 
   # Demo is intentionally part of the default production topology.
@@ -75,7 +81,10 @@ services:
 volumes:
   pgdata:
     external: true
-    name: docker_pgdata
+    name: aqua_prod_pgdata
   media:
     external: true
-    name: docker_media
+    name: aqua_prod_media
+  model:
+    external: true
+    name: aqua_prod_model
