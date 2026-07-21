@@ -3,9 +3,21 @@
   "segment_seconds": 2,
   "phases": [
     {
-      "name": "via alagada",
-      "video_attachment_key_env": "DEMO_VIDEO_ATTACHMENT_KEY",
+      "name": "condição normal",
+      "video_attachment_key_env": "DEMO_NORMAL_VIDEO_ATTACHMENT_KEY",
+      "label": "normal",
+      "duration_seconds": 600
+    },
+    {
+      "name": "condição alagada",
+      "video_attachment_key_env": "DEMO_FLOODED_VIDEO_ATTACHMENT_KEY",
       "label": "flooded",
+      "duration_seconds": 600
+    },
+    {
+      "name": "situação variável",
+      "video_attachment_key_env": "DEMO_DYNAMIC_VIDEO_ATTACHMENT_KEY",
+      "label": null,
       "duration_seconds": 600
     }
   ]

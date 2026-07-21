@@ -11,7 +11,9 @@ from core.flood_camera_monitoring.infra.models import FloodDetectionRecord
 from core.users.infra.models import User
 
 
-def stream_payload(*, state="auto", session_id="session-1", with_segment=True):
+def stream_payload(
+    *, state="auto", session_id="session-1", with_segment=True, expected_state="flooded"
+):
     payload = {
         "ok": True,
         "status": "ready",
@@ -27,7 +29,7 @@ def stream_payload(*, state="auto", session_id="session-1", with_segment=True):
         payload["segment"] = {
             "sequence": 2,
             "phase": "flood phase",
-            "expected_state": "flooded",
+            "expected_state": expected_state,
             "internal_url": "http://demo-stream:8088/hls/seg_000000002.ts",
         }
     return payload
@@ -196,6 +198,48 @@ class DemoApiTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data["validation"]["match"])
+        self.assertEqual(response.data["prediction"]["state"], "flooded")
+        self.assertEqual(FloodDetectionRecord.objects.count(), 0)
+        store_cache.assert_called_once()
+
+    @patch("core.flood_camera_monitoring.presentation.demo_views._store_cache")
+    @patch("core.flood_camera_monitoring.presentation.demo_views._cached", return_value=None)
+    @patch("core.flood_camera_monitoring.presentation.demo_views.aggregate_predictions")
+    @patch("core.flood_camera_monitoring.presentation.demo_views.capture_frames")
+    @patch("core.flood_camera_monitoring.presentation.demo_views.get_default_classifier")
+    @patch("core.flood_camera_monitoring.presentation.demo_views._client")
+    def test_prediction_for_unlabeled_segment_does_not_compare_to_a_scenario(
+        self,
+        client_factory,
+        classifier_factory,
+        capture,
+        aggregate,
+        cached,
+        store_cache,
+    ):
+        client_factory.return_value.get_state.return_value = stream_payload(
+            expected_state=None
+        )
+        classifier_factory.return_value = Mock(_fallback=False)
+        capture.return_value = [b"one", b"two", b"three"]
+        aggregate.return_value = (
+            {
+                "strong": True,
+                "medium_flag": False,
+                "decision_flooded": 85.0,
+                "mean_normal": 10.0,
+                "mean_medium": 5.0,
+                "mean_flooded": 85.0,
+                "frames_count": 3,
+            },
+            [],
+        )
+
+        response = self.client.get("/api/flood_monitoring/demo/predict")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(response.data["validation"]["expected"])
+        self.assertIsNone(response.data["validation"]["match"])
         self.assertEqual(response.data["prediction"]["state"], "flooded")
         self.assertEqual(FloodDetectionRecord.objects.count(), 0)
         store_cache.assert_called_once()

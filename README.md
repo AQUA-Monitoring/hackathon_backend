@@ -72,8 +72,9 @@ docker compose -p aqua-dev up --build
 docker compose -p aqua-dev --profile flood up --build
 
 # Apenas demo
-# Requer um vídeo enviado para /api/upload/videos/ e a variável
-# DEMO_VIDEO_ATTACHMENT_KEY no .env.
+# Requer três vídeos enviados para /api/upload/videos/ e as chaves
+# DEMO_NORMAL_VIDEO_ATTACHMENT_KEY, DEMO_FLOODED_VIDEO_ATTACHMENT_KEY e
+# DEMO_DYNAMIC_VIDEO_ATTACHMENT_KEY no .env.
 docker compose -p aqua-dev --profile demo up --build
 
 # Câmeras e demo

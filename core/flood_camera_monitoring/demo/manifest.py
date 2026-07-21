@@ -22,7 +22,7 @@ class DemoManifestError(ValueError):
 class DemoPhase:
     name: str
     file_path: Path
-    label: str
+    label: str | None
     duration_seconds: int
 
 
@@ -34,7 +34,7 @@ class DemoScenario:
 
     @property
     def available_states(self) -> tuple[str, ...]:
-        labels = {phase.label for phase in self.phases}
+        labels = {phase.label for phase in self.phases if phase.label is not None}
         return ("auto",) + tuple(
             state for state in ("normal", "flooded") if state in labels
         )
@@ -172,9 +172,9 @@ def load_scenario(
         duration = phase.get("duration_seconds")
         if not isinstance(name, str) or not name.strip():
             raise DemoManifestError(f"phases[{index}].name must be non-empty")
-        if label not in ALLOWED_LABELS:
+        if label is not None and label not in ALLOWED_LABELS:
             raise DemoManifestError(
-                f"phases[{index}].label must be one of {sorted(ALLOWED_LABELS)}"
+                f"phases[{index}].label must be null or one of {sorted(ALLOWED_LABELS)}"
             )
         if isinstance(duration, bool) or not isinstance(duration, int) or duration <= 0:
             raise DemoManifestError(
@@ -193,12 +193,12 @@ def load_scenario(
                     video_resolver,
                     require_uploader=require_uploader,
                 ),
-                label=str(label),
+                label=label,
                 duration_seconds=duration,
             )
         )
 
-    labels = {phase.label for phase in phases}
+    labels = {phase.label for phase in phases if phase.label is not None}
     if not labels.intersection({"normal", "flooded"}):
         raise DemoManifestError(
             "Scenario must include at least one normal or flooded phase"

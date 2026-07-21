@@ -149,7 +149,8 @@ class DemoPredictView(APIView):
 
         summary, _ = aggregate_predictions(frames, classifier, cfg)
         actual = operational_state(summary)
-        expected = str(segment.get("expected_state"))
+        raw_expected = segment.get("expected_state")
+        expected = raw_expected if isinstance(raw_expected, str) else None
         public_segment = {
             key: value for key, value in segment.items() if key != "internal_url"
         }
@@ -170,7 +171,7 @@ class DemoPredictView(APIView):
             "validation": {
                 "expected": expected,
                 "actual": actual,
-                "match": expected == actual,
+                "match": expected == actual if expected is not None else None,
             },
             "model": {"ready": True, "fallback": False, "version": version},
         }

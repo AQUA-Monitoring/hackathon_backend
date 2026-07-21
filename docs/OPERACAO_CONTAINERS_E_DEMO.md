@@ -76,7 +76,9 @@ Variáveis principais:
 | FLOOD_CAMERA_SERVICE_URL | Endereço interno do flood-api, padrão http://flood-api:8091 |
 | FLOOD_CAMERA_DEDICATED_QUEUE | 1 no dev para usar a fila flood_camera; 0 em produção |
 | DEMO_CONTROL_TOKEN | Obrigatório para iniciar e controlar demo-stream |
-| DEMO_VIDEO_ATTACHMENT_KEY | Chave retornada por POST /api/upload/videos/ para o vídeo da demo |
+| DEMO_NORMAL_VIDEO_ATTACHMENT_KEY | Chave retornada por POST /api/upload/videos/ para o vídeo com condição normal esperada |
+| DEMO_FLOODED_VIDEO_ATTACHMENT_KEY | Chave retornada por POST /api/upload/videos/ para o vídeo com condição alagada esperada |
+| DEMO_DYNAMIC_VIDEO_ATTACHMENT_KEY | Chave retornada por POST /api/upload/videos/ para o vídeo alternado, analisado sem comparação esperada |
 | DEMO_STREAM_PUBLIC_URL | URL HLS consumida pelo navegador |
 | DEMO_STREAM_INTERNAL_URL | Controle interno da demo, http://demo-stream:8089 |
 | DEMO_STREAM_MEDIA_INTERNAL_BASE_URL | Segmentos internos, http://demo-stream:8088 |
@@ -92,14 +94,16 @@ O uploader aceita PNG, JPEG e SVG seguro em /api/upload/images/, PDF em
 padrão são 10 MiB para imagens e 500 MiB para vídeos; podem ser alterados com
 UPLOADER_IMAGE_MAX_BYTES e UPLOADER_VIDEO_MAX_BYTES.
 
-O arquivo demo_assets/scenario.json mantém apenas a estrutura do cenário. O
-MP4 não faz parte da imagem Docker nem do repositório: demo-stream resolve
-DEMO_VIDEO_ATTACHMENT_KEY no banco e materializa o arquivo a partir do storage
-do Django. O volume media é compartilhado entre web e demo-stream, e o mesmo
-fluxo também funciona com outro backend de storage.
+O arquivo demo_assets/scenario.json mantém apenas a estrutura do cenário. Os
+MP4 não fazem parte da imagem Docker nem do repositório: demo-stream resolve
+as três chaves de vídeo no banco e materializa cada arquivo a partir do storage
+do Django. O vídeo normal e o alagado possuem estado esperado; o vídeo
+alternado é analisado dinamicamente, sem comparação esperada. O volume media é
+compartilhado entre web e demo-stream, e o mesmo fluxo também funciona com
+outro backend de storage.
 
-Antes da primeira execução em cada ambiente, envie o vídeo e copie o
-attachment_key da resposta para o arquivo .env:
+Antes da primeira execução em cada ambiente, envie os três vídeos e copie os
+respectivos attachment_key da resposta para o arquivo .env:
 
 ~~~bash
 curl -f -X POST http://localhost:8001/api/upload/videos/ \
@@ -108,11 +112,13 @@ curl -f -X POST http://localhost:8001/api/upload/videos/ \
   -F 'file=@/caminho/para/demo.mp4'
 
 # .env
-DEMO_VIDEO_ATTACHMENT_KEY=<attachment_key_da_resposta>
+DEMO_NORMAL_VIDEO_ATTACHMENT_KEY=<attachment_key_do_video_normal>
+DEMO_FLOODED_VIDEO_ATTACHMENT_KEY=<attachment_key_do_video_alagado>
+DEMO_DYNAMIC_VIDEO_ATTACHMENT_KEY=<attachment_key_do_video_alternado>
 ~~~
 
-Depois de alterar a chave, recrie demo-stream para que ele carregue o vídeo do
-uploader. O banco e o volume media precisam ser preservados juntos entre
+Depois de alterar qualquer chave, recrie demo-stream para que ele carregue os
+vídeos do uploader. O banco e o volume media precisam ser preservados juntos entre
 deploys.
 
 ~~~bash

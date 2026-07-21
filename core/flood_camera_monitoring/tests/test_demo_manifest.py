@@ -84,6 +84,29 @@ class DemoManifestTests(TestCase):
             self.assertEqual(scenario.available_states, ("auto", "flooded"))
             self.assertEqual(scenario.phase_for_sequence("auto", 0).label, "flooded")
 
+    def test_supports_an_unlabeled_dynamic_phase_only_in_auto_mode(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "dynamic.mp4").touch()
+            path = self._write_scenario(root)
+            payload = json.loads(path.read_text())
+            payload["phases"].append(
+                {
+                    "name": "dynamic phase",
+                    "file": "dynamic.mp4",
+                    "label": None,
+                    "duration_seconds": 4,
+                }
+            )
+            path.write_text(json.dumps(payload), encoding="utf-8")
+
+            scenario = load_scenario(path)
+
+            self.assertEqual(scenario.available_states, ("auto", "normal", "flooded"))
+            self.assertIsNone(scenario.phase_for_sequence("auto", 4).label)
+            self.assertEqual(scenario.phases_for_state("normal")[0].label, "normal")
+            self.assertEqual(scenario.phases_for_state("flooded")[0].label, "flooded")
+
     def test_resolves_an_uploader_video_from_an_environment_key(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)

@@ -10,8 +10,14 @@
     },
     {
       "name": "via alagada",
-      "video_attachment_key_env": "DEMO_VIDEO_ATTACHMENT_KEY",
+      "video_attachment_key_env": "DEMO_FLOODED_VIDEO_ATTACHMENT_KEY",
       "label": "flooded",
+      "duration_seconds": 30
+    },
+    {
+      "name": "situação variável",
+      "video_attachment_key_env": "DEMO_DYNAMIC_VIDEO_ATTACHMENT_KEY",
+      "label": null,
       "duration_seconds": 30
     }
   ]
