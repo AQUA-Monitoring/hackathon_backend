@@ -22,6 +22,7 @@ from core.flood_camera_monitoring.infra.models import (
     Camera,
     CameraOperationalSnapshot,
 )
+from core.flood_camera_monitoring.presentation.serializers import CameraReadSerializer
 from core.users.infra.models import User
 
 
@@ -97,6 +98,33 @@ class CameraMetadataApiTests(APITestCase):
         self.assertEqual(snapshot.analysis_status, snapshot.AnalysisStatus.NOT_ANALYZED)
         self.assertEqual(snapshot.model_status, snapshot.ModelStatus.UNKNOWN)
         self.assertEqual(response.data["created_by"], {"id": str(self.admin.id)})
+
+    def test_camera_payload_prioritizes_canonical_region_over_legacy_location(self):
+        camera = Camera.objects.create(
+            status=Camera.CameraStatus.ACTIVE,
+            description="Câmera com região canônica",
+            region=self.region,
+        )
+
+        self.assertEqual(
+            CameraReadSerializer(camera).data["region"],
+            {"id": str(self.region.id), "name": self.region.name},
+        )
+
+    def test_camera_creation_requires_neighborhood_with_active_canonical_region(self):
+        unassigned = Neighborhood.objects.create(
+            name="Sem região",
+            city=self.city.name,
+            city_ref=self.city,
+        )
+        payload = self.camera_payload()
+        payload["address"]["neighborhood_id"] = str(unassigned.id)
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.post("/api/flood_monitoring/cameras/", payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("região canônica ativa", response.data["address"]["neighborhood_id"][0])
 
     def test_admin_creates_camera_with_canonical_address_reference_snapshot(self):
         dataset = GeodataDataset.objects.create(

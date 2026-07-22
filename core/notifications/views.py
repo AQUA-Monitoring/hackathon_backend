@@ -19,6 +19,7 @@ from .serializers import (
     ResolveSerializer,
 )
 from .services import schedule_publication_push
+from core.flood_camera_monitoring.services.operational_alerts import canonical_region_for_camera
 
 
 class RegionSubscriptionViewSet(viewsets.ViewSet):
@@ -110,6 +111,28 @@ class OperationalAlertViewSet(viewsets.ViewSet):
 
     @staticmethod
     def _serialize(alert):
+        def serialize_detection(detection):
+            image_url = None
+            if detection.image:
+                try:
+                    image_url = detection.image.url
+                except ValueError:
+                    image_url = None
+            return {
+                "id": str(detection.id),
+                "camera_id": str(detection.camera_id),
+                "created_at": detection.created_at,
+                "is_flooded": detection.is_flooded,
+                "medium": detection.medium,
+                "confidence": detection.confidence,
+                "probabilities": {
+                    "normal": detection.prob_normal,
+                    "medium": detection.prob_medium,
+                    "flooded": detection.prob_flooded,
+                },
+                "image_url": image_url,
+            }
+
         transitions = [
             {
                 "id": str(item.id),
@@ -165,6 +188,7 @@ class OperationalAlertViewSet(viewsets.ViewSet):
                 "image_url": image_url,
             }
         )
+        effective_region = canonical_region_for_camera(alert.camera) or alert.region
         return {
             "id": str(alert.id),
             "status": alert.status,
@@ -176,17 +200,21 @@ class OperationalAlertViewSet(viewsets.ViewSet):
             },
             "region": (
                 {
-                    "id": str(alert.region_id),
-                    "name": alert.region.name,
+                    "id": str(effective_region.id),
+                    "name": effective_region.name,
                     "city": {
-                        "id": str(alert.region.city_ref_id) if alert.region.city_ref_id else "",
-                        "name": alert.region.city,
+                        "id": str(effective_region.city_ref_id) if effective_region.city_ref_id else "",
+                        "name": effective_region.city,
                     },
                 }
-                if alert.region_id
+                if effective_region
                 else None
             ),
             "evidence": evidence,
+            "detection_records": {
+                "initial": serialize_detection(alert.initial_detection),
+                "latest": serialize_detection(alert.latest_detection),
+            },
             "first_detected_at": alert.first_detected_at,
             "last_detected_at": alert.last_detected_at,
             "confirmed_at": alert.confirmed_at,

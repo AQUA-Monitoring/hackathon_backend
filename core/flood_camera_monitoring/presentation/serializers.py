@@ -285,6 +285,8 @@ class CameraReadSerializer(serializers.Serializer):
         return {"id": str(neighborhood.id), "name": neighborhood.name}
 
     def get_region(self, camera):
+        if camera.region_id:
+            return {"id": str(camera.region_id), "name": camera.region.name}
         neighborhood, _, _ = self._legacy_location(camera)
         region = neighborhood.region if neighborhood else None
         if region is None:

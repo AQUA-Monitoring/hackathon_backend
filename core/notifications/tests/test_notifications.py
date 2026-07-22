@@ -242,6 +242,30 @@ class OperationalAlertApiTests(NotificationFixture):
         self.assertEqual(alert["evidence"]["initial_detection_id"], str(self.detection.id))
         self.assertEqual(alert["evidence"]["latest_detection_id"], str(self.detection.id))
         self.assertIsNone(alert["evidence"]["image_url"])
+        self.assertEqual(
+            alert["detection_records"]["initial"]["id"], str(self.detection.id)
+        )
+        self.assertEqual(
+            alert["detection_records"]["latest"]["probabilities"]["flooded"],
+            self.detection.prob_flooded,
+        )
+
+    def test_admin_feed_uses_the_camera_canonical_region_for_legacy_alert(self):
+        self.alert.region = None
+        self.alert.save(update_fields=["region"])
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get("/api/operational-alerts/?status=OPEN_INDICATION")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data["results"][0]["region"],
+            {
+                "id": str(self.region.id),
+                "name": self.region.name,
+                "city": {"id": str(self.city.id), "name": self.city.name},
+            },
+        )
 
     @patch("core.notifications.tasks.deliver_push_batch_task.delay")
     def test_confirmation_is_unique_and_second_request_conflicts(self, delay):

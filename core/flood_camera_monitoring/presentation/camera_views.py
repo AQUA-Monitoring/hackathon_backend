@@ -40,6 +40,9 @@ from core.flood_camera_monitoring.services.nearby import (
     find_nearby_cameras,
 )
 from core.flood_camera_monitoring.services.territorial_context import apply_camera_territorial_context
+from core.flood_camera_monitoring.services.operational_alerts import (
+    sync_active_alert_regions_for_camera,
+)
 from core.addressing.services import TerritoryResolutionError
 from core.flood_camera_monitoring.infra.models import (
     Camera,
@@ -476,6 +479,17 @@ class CameraMetadataViewSet(SafeOrderingMixin, viewsets.ViewSet):
                     return Response({"address": {"city_id": ["Cidade não encontrada."]}}, status=status.HTTP_400_BAD_REQUEST)
                 if neighborhood is None or (neighborhood.city_ref_id and neighborhood.city_ref_id != city.id):
                     return Response({"address": {"neighborhood_id": ["Bairro não encontrado ou incompatível com a cidade."]}}, status=status.HTTP_400_BAD_REQUEST)
+                if (
+                    not neighborhood.region_id
+                    or not neighborhood.region.is_active
+                    or neighborhood.region.city_ref_id != city.id
+                ):
+                    return Response(
+                        {"address": {"neighborhood_id": [
+                            "O bairro precisa estar associado a uma região canônica ativa da cidade."
+                        ]}},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
                 latitude, longitude = address_data["latitude"], address_data["longitude"]
                 if latitude == 0 and longitude == 0:
                     return Response({"address": {"coordinates": ["[0,0] não representa uma localização operacional resolvida."]}}, status=status.HTTP_400_BAD_REQUEST)
@@ -501,6 +515,7 @@ class CameraMetadataViewSet(SafeOrderingMixin, viewsets.ViewSet):
                     camera.territory_resolution = {"method": "LEGACY_ADDRESS", "resolved": False}
 
             camera.save()
+            sync_active_alert_regions_for_camera(camera)
             if camera.status != Camera.CameraStatus.ACTIVE:
                 snapshot, _ = CameraOperationalSnapshot.objects.get_or_create(camera=camera)
                 snapshot.analysis_status = snapshot.AnalysisStatus.NOT_ANALYZED
@@ -579,7 +594,7 @@ class CameraMetadataViewSet(SafeOrderingMixin, viewsets.ViewSet):
                 {"address": {"city_id": ["Cidade não encontrada."]}},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        neighborhood = Neighborhood.objects.select_related("city_ref").filter(
+        neighborhood = Neighborhood.objects.select_related("city_ref", "region").filter(
             pk=address_data["neighborhood_id"]
         ).first()
         if neighborhood is None:
@@ -599,6 +614,21 @@ class CameraMetadataViewSet(SafeOrderingMixin, viewsets.ViewSet):
                     "address": {
                         "neighborhood_id": [
                             "O bairro não pertence à cidade informada."
+                        ]
+                    }
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if (
+            not neighborhood.region_id
+            or not neighborhood.region.is_active
+            or neighborhood.region.city_ref_id != city.id
+        ):
+            return Response(
+                {
+                    "address": {
+                        "neighborhood_id": [
+                            "O bairro precisa estar associado a uma região canônica ativa da cidade."
                         ]
                     }
                 },
@@ -901,6 +931,7 @@ class CameraMetadataViewSet(SafeOrderingMixin, viewsets.ViewSet):
                 "city", "region", "neighborhood", "street", "road_segment",
                 "address_reference", "territory_resolution", "updated_at",
             ])
+            sync_active_alert_regions_for_camera(camera)
             CameraOperationalSnapshot.objects.create(camera=camera)
 
         camera = _camera_metadata_queryset().get(pk=camera.pk)

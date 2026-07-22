@@ -46,6 +46,50 @@ class AlertConfirmation:
 PublicationCallback = Callable[[AlertPublication, str], None]
 
 
+def canonical_region_for_camera(camera):
+    """Return one active, territorially consistent region for a camera."""
+
+    candidates = []
+    for region in (
+        camera.region,
+        getattr(camera.neighborhood, "region", None),
+        getattr(getattr(camera.address, "neighborhood", None), "region", None),
+    ):
+        if region is not None and region.is_active and region not in candidates:
+            candidates.append(region)
+
+    known_city_ids = {
+        city_id
+        for city_id in (
+            getattr(camera, "city_id", None),
+            getattr(camera.neighborhood, "city_ref_id", None),
+            getattr(getattr(camera.address, "city_ref", None), "id", None),
+            getattr(getattr(camera.address, "neighborhood", None), "city_ref_id", None),
+        )
+        if city_id is not None
+    }
+    if known_city_ids:
+        candidates = [region for region in candidates if region.city_ref_id in known_city_ids]
+    if len(candidates) != 1:
+        return None
+    return candidates[0]
+
+
+def sync_active_alert_regions_for_camera(camera) -> int:
+    """Synchronize active alerts only when the camera has one safe region."""
+
+    region = canonical_region_for_camera(camera)
+    if region is None:
+        return 0
+    return OperationalAlert.objects.filter(
+        camera_id=camera.pk,
+        status__in=(
+            OperationalAlert.Status.OPEN_INDICATION,
+            OperationalAlert.Status.CONFIRMED,
+        ),
+    ).exclude(region_id=region.id).update(region=region)
+
+
 def _evidence(snapshot: CameraOperationalSnapshot, detection: FloodDetectionRecord) -> dict[str, Any]:
     return {
         "classification": snapshot.classification,
@@ -175,15 +219,28 @@ def confirm_operational_alert(
 ) -> AlertConfirmation:
     _require_admin(actor)
     with transaction.atomic():
-        alert = OperationalAlert.objects.select_for_update().get(pk=alert_id)
+        alert = (
+            OperationalAlert.objects
+            .select_related(
+                "camera__neighborhood__region",
+                "camera__address__city_ref",
+                "camera__address__neighborhood__region",
+                "region",
+            )
+            .select_for_update(of=("self",))
+            .get(pk=alert_id)
+        )
         if alert.status != OperationalAlert.Status.OPEN_INDICATION:
             raise InvalidAlertTransition("Only an open indication can be confirmed")
-        if (
-            alert.region_id is None
-            or alert.camera.region_id != alert.region_id
-            or not alert.region.is_active
-        ):
-            raise AlertRegionRequired("A canonical region is required for confirmation")
+        canonical_region = canonical_region_for_camera(alert.camera)
+        if canonical_region is None:
+            raise AlertRegionRequired(
+                "Não foi possível confirmar: corrija a localização territorial da câmera "
+                "e associe-a a uma região canônica ativa."
+            )
+        if alert.region_id != canonical_region.id:
+            alert.region = canonical_region
+            alert.save(update_fields=["region", "updated_at"])
 
         now = timezone.now()
         alert.status = OperationalAlert.Status.CONFIRMED

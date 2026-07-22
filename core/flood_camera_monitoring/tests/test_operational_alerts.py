@@ -2,7 +2,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 
-from core.addressing.models import Region
+from core.addressing.models import Address, City, Neighborhood, Region
 from core.flood_camera_monitoring.infra.models import (
     AlertPublication,
     Camera,
@@ -20,6 +20,7 @@ from core.flood_camera_monitoring.services.operational_alerts import (
     create_or_update_alert_for_detection,
     dismiss_operational_alert,
     resolve_operational_alert,
+    sync_active_alert_regions_for_camera,
 )
 from core.users.infra.models import User
 
@@ -164,6 +165,79 @@ class OperationalAlertDomainTests(TestCase):
         alert, _ = create_or_update_alert_for_detection(
             self.detection(), self.snapshot
         )
+        with self.assertRaises(AlertRegionRequired):
+            confirm_operational_alert(alert.pk, self.admin)
+
+    def test_location_update_synchronizes_active_alert_region(self):
+        alert, _ = create_or_update_alert_for_detection(self.detection(), self.snapshot)
+        alert.region = None
+        alert.save(update_fields=["region"])
+
+        self.assertEqual(sync_active_alert_regions_for_camera(self.camera), 1)
+        self.assertEqual(
+            OperationalAlert.objects.get(pk=alert.pk).region,
+            self.region,
+        )
+
+    def test_confirmation_repairs_region_from_camera_neighborhood(self):
+        city = City.objects.create(name="Joinville")
+        self.region.city_ref = city
+        self.region.save(update_fields=["city_ref"])
+        neighborhood = Neighborhood.objects.create(
+            name="Centro", city=city.name, city_ref=city, region=self.region
+        )
+        self.camera.region = None
+        self.camera.city = city
+        self.camera.neighborhood = neighborhood
+        self.camera.save(update_fields=["region", "city", "neighborhood"])
+        alert, _ = create_or_update_alert_for_detection(self.detection(), self.snapshot)
+
+        result = confirm_operational_alert(alert.pk, self.admin)
+
+        self.assertEqual(result.alert.region, self.region)
+        self.assertEqual(
+            OperationalAlert.objects.get(pk=alert.pk).region_id,
+            self.region.id,
+        )
+
+    def test_confirmation_repairs_region_from_address_neighborhood(self):
+        city = City.objects.create(name="Joinville")
+        self.region.city_ref = city
+        self.region.save(update_fields=["city_ref"])
+        neighborhood = Neighborhood.objects.create(
+            name="Centro", city=city.name, city_ref=city, region=self.region
+        )
+        self.camera.region = None
+        self.camera.neighborhood = None
+        self.camera.address = Address.objects.create(
+            street="Rua da Câmera",
+            city=city.name,
+            city_ref=city,
+            neighborhood=neighborhood,
+        )
+        self.camera.save(update_fields=["region", "neighborhood", "address"])
+        alert, _ = create_or_update_alert_for_detection(self.detection(), self.snapshot)
+
+        result = confirm_operational_alert(alert.pk, self.admin)
+
+        self.assertEqual(result.alert.region, self.region)
+
+    def test_confirmation_rejects_conflicting_territorial_regions(self):
+        city = City.objects.create(name="Joinville")
+        self.region.city_ref = city
+        self.region.save(update_fields=["city_ref"])
+        other_region = Region.objects.create(
+            name="Região conflitante", city=city.name, city_ref=city
+        )
+        neighborhood = Neighborhood.objects.create(
+            name="Centro", city=city.name, city_ref=city, region=self.region
+        )
+        self.camera.region = other_region
+        self.camera.city = city
+        self.camera.neighborhood = neighborhood
+        self.camera.save(update_fields=["region", "city", "neighborhood"])
+        alert, _ = create_or_update_alert_for_detection(self.detection(), self.snapshot)
+
         with self.assertRaises(AlertRegionRequired):
             confirm_operational_alert(alert.pk, self.admin)
 
