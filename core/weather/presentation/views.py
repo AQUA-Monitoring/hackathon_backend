@@ -1,4 +1,4 @@
-from rest_framework import views
+from rest_framework import views, status
 from rest_framework.response import Response
 from core.weather.presentation.serializers import WeatherSerializer
 from core.weather.services.weather import WeatherService
