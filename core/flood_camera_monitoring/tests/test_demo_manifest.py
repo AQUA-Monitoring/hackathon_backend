@@ -13,11 +13,18 @@ from core.flood_camera_monitoring.demo.manifest import (
 class DemoManifestTests(TestCase):
     def _write_scenario(self, root: Path, **updates) -> Path:
         (root / "normal.mp4").touch()
+        (root / "auto.mp4").touch()
         (root / "flooded.mp4").touch()
         payload = {
             "scenario_id": "test-scenario",
             "segment_seconds": 2,
             "phases": [
+                {
+                    "name": "automatic phase",
+                    "file": "auto.mp4",
+                    "label": None,
+                    "duration_seconds": 4,
+                },
                 {
                     "name": "normal phase",
                     "file": "normal.mp4",
@@ -41,10 +48,8 @@ class DemoManifestTests(TestCase):
         with TemporaryDirectory() as directory:
             scenario = load_scenario(self._write_scenario(Path(directory)))
 
-            self.assertEqual(scenario.phase_for_sequence("auto", 0).label, "normal")
-            self.assertEqual(scenario.phase_for_sequence("auto", 1).label, "normal")
-            self.assertEqual(scenario.phase_for_sequence("auto", 2).label, "flooded")
-            self.assertEqual(scenario.phase_for_sequence("auto", 4).label, "normal")
+            self.assertIsNone(scenario.phase_for_sequence("auto", 0).label)
+            self.assertIsNone(scenario.phase_for_sequence("auto", 4).label)
             self.assertEqual(
                 scenario.phase_for_sequence("flooded", 999).label, "flooded"
             )
@@ -76,20 +81,17 @@ class DemoManifestTests(TestCase):
             root = Path(directory)
             path = self._write_scenario(root)
             payload = json.loads(path.read_text())
-            payload["phases"] = payload["phases"][1:]
+            payload["phases"] = payload["phases"][2:]
             path.write_text(json.dumps(payload))
 
-            scenario = load_scenario(path)
-
-            self.assertEqual(scenario.available_states, ("auto", "flooded"))
-            self.assertEqual(scenario.phase_for_sequence("auto", 0).label, "flooded")
+            with self.assertRaisesRegex(DemoManifestError, "state 'auto'"):
+                load_scenario(path)
 
     def test_resolves_an_uploader_video_from_an_environment_key(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             path = self._write_scenario(root)
             payload = json.loads(path.read_text())
-            payload["phases"] = payload["phases"][1:]
             payload["phases"][0].pop("file")
             payload["phases"][0]["video_attachment_key_env"] = (
                 "DEMO_VIDEO_ATTACHMENT_KEY"
@@ -115,7 +117,6 @@ class DemoManifestTests(TestCase):
             root = Path(directory)
             path = self._write_scenario(root)
             payload = json.loads(path.read_text())
-            payload["phases"] = payload["phases"][1:]
             payload["phases"][0].pop("file")
             payload["phases"][0]["video_attachment_key_env"] = (
                 "DEMO_VIDEO_ATTACHMENT_KEY"
@@ -128,8 +129,40 @@ class DemoManifestTests(TestCase):
             ):
                 load_scenario(path, video_resolver=Mock())
 
+    def test_persisted_slot_overrides_the_manifest_environment_key(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = self._write_scenario(root)
+            payload = json.loads(path.read_text())
+            payload["phases"][1].pop("file")
+            payload["phases"][1]["video_attachment_key_env"] = "DEMO_NORMAL_KEY"
+            path.write_text(json.dumps(payload))
+            resolved_video = root / "persisted-normal.mp4"
+            resolved_video.touch()
+            resolver = Mock(return_value=resolved_video)
+
+            scenario = load_scenario(
+                path,
+                video_resolver=resolver,
+                state_video_keys={"normal": "persisted-attachment-key"},
+            )
+
+            resolver.assert_called_once_with("persisted-attachment-key")
+            self.assertEqual(scenario.phase_for_state("normal").file_path, resolved_video)
+
     def test_operational_manifest_rejects_local_files(self):
         with TemporaryDirectory() as directory:
             path = self._write_scenario(Path(directory))
             with self.assertRaisesRegex(DemoManifestError, "somente vídeos do uploader"):
                 load_scenario(path, require_uploader=True)
+
+    def test_rejects_more_than_one_video_for_a_state(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = self._write_scenario(root)
+            payload = json.loads(path.read_text())
+            payload["phases"].append(dict(payload["phases"][1], name="duplicate"))
+            path.write_text(json.dumps(payload))
+
+            with self.assertRaisesRegex(DemoManifestError, "exactly one video"):
+                load_scenario(path)

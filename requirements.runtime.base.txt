@@ -9,6 +9,7 @@ django-celery-beat>=2.7.0
 dj-database-url==3.0.1
 python-dotenv>=1.0.0
 requests>=2.31.0
+pywebpush==2.3.0
 gunicorn==23.0.0
 whitenoise==6.10.0
 pillow==10.4.0

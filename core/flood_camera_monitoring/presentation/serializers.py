@@ -128,6 +128,12 @@ class DemoStateSerializer(serializers.Serializer):
     state = serializers.ChoiceField(choices=("auto", "normal", "flooded"))
 
 
+class DemoPredictionQuerySerializer(serializers.Serializer):
+    """Select the exact HLS segment currently rendered by the demo player."""
+
+    sequence = serializers.IntegerField(required=False, min_value=0)
+
+
 def _date_time(value):
     if value is None:
         return None

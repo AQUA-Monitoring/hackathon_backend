@@ -54,6 +54,7 @@ urlpatterns = [
         "api/floods_point/", include("core.flood_point_registering.presentation.urls")
     ),
     path("api/blog/", include("core.blog.presentation.urls")),
+    path("api/", include("core.notifications.urls")),
     path("api/export/", ExportView.as_view(), name="export-data"),
     path("media/<path:path>", serve_media, name="media-file"),
 ]

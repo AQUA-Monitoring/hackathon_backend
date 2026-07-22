@@ -1,4 +1,4 @@
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 from django.test import override_settings
 from rest_framework import status
@@ -22,6 +22,14 @@ def stream_payload(*, state="auto", session_id="session-1", with_segment=True):
         "current_phase": "flood phase",
         "hls_url": "http://localhost:8088/hls/playlist.m3u8",
         "segment": None,
+        "source": {
+            "type": "uploader",
+            "mode": state,
+            "status": "ready",
+            "attachment_key": "private-key",
+            "version": "private-version",
+        },
+        "sources": {state: {"attachment_key": "private-key"}},
     }
     if with_segment:
         payload["segment"] = {
@@ -61,6 +69,11 @@ class DemoApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data["enabled"])
         self.assertNotIn("internal_url", response.data["segment"])
+        self.assertNotIn("sources", response.data)
+        self.assertEqual(
+            response.data["source"],
+            {"type": "uploader", "mode": "auto", "status": "ready"},
+        )
 
     @override_settings(DEMO_ENABLED=False)
     @patch("core.flood_camera_monitoring.presentation.demo_control_views._client")
@@ -223,3 +236,51 @@ class DemoApiTests(APITestCase):
         response = self.client.get("/api/flood_monitoring/demo/predict")
 
         self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    @patch("core.flood_camera_monitoring.presentation.demo_views._store_cache")
+    @patch("core.flood_camera_monitoring.presentation.demo_views._cached", return_value=None)
+    @patch("core.flood_camera_monitoring.presentation.demo_views.aggregate_predictions")
+    @patch("core.flood_camera_monitoring.presentation.demo_views.capture_frames")
+    @patch("core.flood_camera_monitoring.presentation.demo_views.get_default_classifier")
+    @patch("core.flood_camera_monitoring.presentation.demo_views._client")
+    def test_prediction_analyzes_the_exact_requested_segment(
+        self,
+        client_factory,
+        classifier_factory,
+        capture,
+        aggregate,
+        _cached,
+        _store_cache,
+    ):
+        client_factory.return_value.get_state.return_value = stream_payload()
+        classifier_factory.return_value = Mock(_fallback=False)
+        capture.return_value = [b"one"]
+        aggregate.return_value = (
+            {
+                "strong": False,
+                "medium_flag": False,
+                "decision_flooded": 5.0,
+                "mean_normal": 90.0,
+                "mean_medium": 5.0,
+                "mean_flooded": 5.0,
+                "frames_count": 1,
+            },
+            [],
+        )
+
+        response = self.client.get("/api/flood_monitoring/demo/predict?sequence=1")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["segment"]["sequence"], 1)
+        capture.assert_called_once_with(
+            "http://demo-stream:8088/hls/seg_000000001.ts",
+            ANY,
+        )
+
+    @patch("core.flood_camera_monitoring.presentation.demo_views._client")
+    def test_prediction_rejects_a_future_segment(self, client_factory):
+        client_factory.return_value.get_state.return_value = stream_payload()
+
+        response = self.client.get("/api/flood_monitoring/demo/predict?sequence=3")
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)

@@ -34,6 +34,9 @@ from core.flood_camera_monitoring.services.model_artifact import (
     ModelArtifactInfo,
     inspect_model_artifact,
 )
+from core.flood_camera_monitoring.services.operational_alerts import (
+    create_or_update_alert_for_detection,
+)
 from core.flood_camera_monitoring.infra.models import (
     Camera,
     CameraOperationalSnapshot,
@@ -180,7 +183,9 @@ class AnalyzeAllCamerasService:
                 CameraOperationalSnapshot.CameraClassification.FLOOD_INDICATION,
                 CameraOperationalSnapshot.CameraClassification.INTERMEDIATE_INDICATION,
             }:
-                if self._persist_detection(camera, frames, summary, classification):
+                if self._persist_detection(
+                    camera, snapshot, frames, summary, classification
+                ):
                     saved += 1
 
             data.append(snapshot_prediction_payload(camera, snapshot))
@@ -272,6 +277,7 @@ class AnalyzeAllCamerasService:
     @staticmethod
     def _persist_detection(
         camera,
+        snapshot: CameraOperationalSnapshot,
         frames: list[bytes],
         summary: dict[str, Any],
         classification: str,
@@ -297,7 +303,7 @@ class AnalyzeAllCamerasService:
         }
         try:
             with transaction.atomic():
-                FloodDetectionRecord.objects.create(
+                detection = FloodDetectionRecord.objects.create(
                     **values,
                     image=(
                         ContentFile(
@@ -308,6 +314,8 @@ class AnalyzeAllCamerasService:
                         else None
                     ),
                 )
+                if is_flooded:
+                    create_or_update_alert_for_detection(detection, snapshot)
             return True
         except Exception:
             logger.warning(
@@ -317,7 +325,9 @@ class AnalyzeAllCamerasService:
             )
         try:
             with transaction.atomic():
-                FloodDetectionRecord.objects.create(**values, image=None)
+                detection = FloodDetectionRecord.objects.create(**values, image=None)
+                if is_flooded:
+                    create_or_update_alert_for_detection(detection, snapshot)
             return True
         except Exception:
             logger.exception("Could not persist detection for camera id=%s", camera.id)

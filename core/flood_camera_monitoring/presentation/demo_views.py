@@ -29,9 +29,13 @@ from core.flood_camera_monitoring.presentation.demo_control_views import (
     DemoStateView as BaseDemoStateView,
     DemoStatusView as BaseDemoStatusView,
 )
+from core.flood_camera_monitoring.presentation.serializers import (
+    DemoPredictionQuerySerializer,
+)
 
 
 logger = logging.getLogger(__name__)
+MAX_REQUESTED_SEGMENT_LAG = 6
 
 
 def _enabled() -> bool:
@@ -44,6 +48,14 @@ def _client() -> DemoStreamClient:
 
 def _public_payload(payload: dict[str, Any]) -> dict[str, Any]:
     output = dict(payload)
+    output.pop("sources", None)
+    source = output.get("source")
+    if isinstance(source, dict):
+        output["source"] = {
+            key: value
+            for key, value in source.items()
+            if key in {"type", "mode", "status"}
+        }
     segment = output.get("segment")
     if isinstance(segment, dict):
         output["segment"] = {
@@ -112,6 +124,31 @@ class DemoPredictView(APIView):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
+        query = DemoPredictionQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        requested_sequence = query.validated_data.get("sequence")
+        if requested_sequence is not None:
+            latest_sequence = int(segment["sequence"])
+            if requested_sequence > latest_sequence:
+                return Response(
+                    {"detail": "The requested demo segment is not complete yet"},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            if latest_sequence - requested_sequence > MAX_REQUESTED_SEGMENT_LAG:
+                return Response(
+                    {"detail": "The requested demo segment is no longer available"},
+                    status=status.HTTP_410_GONE,
+                )
+            internal_url = str(segment["internal_url"])
+            segment = {
+                **segment,
+                "sequence": requested_sequence,
+                "internal_url": (
+                    f"{internal_url.rsplit('/', 1)[0]}/"
+                    f"seg_{requested_sequence:09d}.ts"
+                ),
+            }
+
         version = _model_version()
         cache_key = (
             f"flood:demo:{stream_state.get('session_id')}:"
@@ -149,7 +186,8 @@ class DemoPredictView(APIView):
 
         summary, _ = aggregate_predictions(frames, classifier, cfg)
         actual = operational_state(summary)
-        expected = str(segment.get("expected_state"))
+        raw_expected = segment.get("expected_state")
+        expected = raw_expected if isinstance(raw_expected, str) else None
         public_segment = {
             key: value for key, value in segment.items() if key != "internal_url"
         }
@@ -170,7 +208,7 @@ class DemoPredictView(APIView):
             "validation": {
                 "expected": expected,
                 "actual": actual,
-                "match": expected == actual,
+                "match": expected == actual if expected is not None else None,
             },
             "model": {"ready": True, "fallback": False, "version": version},
         }

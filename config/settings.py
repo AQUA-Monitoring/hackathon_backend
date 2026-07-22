@@ -92,6 +92,7 @@ INSTALLED_APPS = [
     "core.flood_point_registering",
     "core.donate",
     "core.blog",
+    "core.notifications",
 ]
 
 
@@ -221,7 +222,7 @@ UPLOADER_IMAGE_MAX_BYTES = int(
     os.getenv("UPLOADER_IMAGE_MAX_BYTES", str(10 * 1024 * 1024))
 )
 UPLOADER_VIDEO_MAX_BYTES = int(
-    os.getenv("UPLOADER_VIDEO_MAX_BYTES", str(500 * 1024 * 1024))
+    os.getenv("UPLOADER_VIDEO_MAX_BYTES", str(300 * 1024 * 1024))
 )
 
 # Optional deterministic demo stream. The default keeps demo endpoints
@@ -268,7 +269,24 @@ CELERY_BEAT_SCHEDULE = {
         "task": "core.flood_camera_monitoring.infra.tasks.analyze_all_cameras_task",
         "schedule": 300.00,
     },
+    "recover-failed-push-deliveries": {
+        "task": "core.notifications.tasks.recover_failed_push_deliveries_task",
+        "schedule": 300.00,
+    },
 }
+
+# Web Push remains disabled until all VAPID values are supplied by the runtime.
+WEB_PUSH_VAPID_PUBLIC_KEY = os.getenv("WEB_PUSH_VAPID_PUBLIC_KEY", "").strip()
+WEB_PUSH_VAPID_PRIVATE_KEY = os.getenv("WEB_PUSH_VAPID_PRIVATE_KEY", "").strip()
+WEB_PUSH_VAPID_SUBJECT = os.getenv("WEB_PUSH_VAPID_SUBJECT", "").strip()
+WEB_PUSH_ENABLED = os.getenv("WEB_PUSH_ENABLED", "0") == "1" and bool(
+    WEB_PUSH_VAPID_PUBLIC_KEY
+    and WEB_PUSH_VAPID_PRIVATE_KEY
+    and WEB_PUSH_VAPID_SUBJECT
+)
+WEB_PUSH_TTL_SECONDS = int(os.getenv("WEB_PUSH_TTL_SECONDS", "3600"))
+WEB_PUSH_MAX_ATTEMPTS = int(os.getenv("WEB_PUSH_MAX_ATTEMPTS", "5"))
+WEB_PUSH_RECOVERY_BATCH_SIZE = int(os.getenv("WEB_PUSH_RECOVERY_BATCH_SIZE", "100"))
 
 # Only development services that explicitly opt into Flood Monitoring route
 # its work to the dedicated worker. Production retains the established queue.

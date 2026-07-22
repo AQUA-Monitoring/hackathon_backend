@@ -46,3 +46,13 @@ class TokenRefreshTests(TestCase):
             "/api/auth/token/refresh/", {"refresh": "invalid"}, format="json"
         )
         self.assertEqual(response.status_code, 401)
+
+    def test_me_exposes_superuser_flag(self):
+        self.user.is_superuser = True
+        self.user.save(update_fields=["is_superuser"])
+        self.client.force_authenticate(self.user)
+
+        response = self.client.get("/api/users/me/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIs(response.data["is_superuser"], True)

@@ -3,10 +3,22 @@
   "segment_seconds": 2,
   "phases": [
     {
-      "name": "via alagada",
-      "video_attachment_key_env": "DEMO_VIDEO_ATTACHMENT_KEY",
+      "name": "normal",
+      "video_attachment_key_env": "DEMO_NORMAL_VIDEO_ATTACHMENT_KEY",
+      "label": "normal",
+      "duration_seconds": 300
+    },
+    {
+      "name": "alternado",
+      "video_attachment_key_env": "DEMO_DYNAMIC_VIDEO_ATTACHMENT_KEY",
+      "label": null,
+      "duration_seconds": 300
+    },
+    {
+      "name": "alagado",
+      "video_attachment_key_env": "DEMO_FLOODED_VIDEO_ATTACHMENT_KEY",
       "label": "flooded",
-      "duration_seconds": 600
+      "duration_seconds": 300
     }
   ]
 }

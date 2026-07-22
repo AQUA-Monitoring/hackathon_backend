@@ -8,6 +8,10 @@ from core.flood_camera_monitoring.presentation.demo_views import (
     DemoStatusView,
 )
 from core.flood_camera_monitoring.presentation.camera_views import CameraMetadataViewSet
+from core.flood_camera_monitoring.presentation.demo_source_views import (
+    DemoSourcesView,
+    DemoSourceUploadView,
+)
 from core.flood_camera_monitoring.presentation.health_views import HealthcheckView
 from core.flood_camera_monitoring.presentation.monitoring_views import FloodMonitoringViewSet
 
@@ -42,4 +46,10 @@ urlpatterns = [
     path("demo", DemoStatusView.as_view(), name="demo-status"),
     path("demo/state", DemoStateView.as_view(), name="demo-state"),
     path("demo/predict", DemoPredictView.as_view(), name="demo-predict"),
+    path("demo/sources", DemoSourcesView.as_view(), name="demo-sources"),
+    path(
+        "demo/sources/<str:mode>",
+        DemoSourceUploadView.as_view(),
+        name="demo-source-upload",
+    ),
 ]
