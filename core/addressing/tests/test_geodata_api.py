@@ -22,6 +22,18 @@ class GeodataApiTests(TestCase):
         self.assertEqual(self.client.get("/api/addressing/streets/").status_code, 200)
         self.assertIn(self.client.get("/api/addressing/address-references/").status_code, (401, 403))
 
+    def test_v2_streets_expose_reference_provenance_contract(self):
+        response = self.client.get("/api/addressing/v2/streets/")
+        self.assertEqual(response.status_code, 200)
+        item = response.data["results"][0]
+        self.assertEqual(item["classification"], "reference")
+        self.assertEqual(item["precision"], "exact")
+        self.assertIsNone(item["distance_m"])
+        self.assertEqual(item["source"]["authority"], "Prefeitura")
+        self.assertEqual(item["source"]["edition"], "1")
+        self.assertEqual(item["source"]["license"]["name"], "Licença oficial")
+        self.assertEqual(item["provenance"], item["source"])
+
     def test_autocomplete_requires_authentication_and_scopes_streets(self):
         unauthenticated = self.client.get(
             "/api/addressing/autocomplete/",
