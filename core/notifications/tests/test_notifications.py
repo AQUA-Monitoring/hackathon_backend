@@ -4,7 +4,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from core.addressing.models import City, Region
+from core.addressing.models import Address, City, Neighborhood, Region
 from core.flood_camera_monitoring.infra.models import (
     Camera,
     FloodDetectionRecord,
@@ -266,6 +266,153 @@ class OperationalAlertApiTests(NotificationFixture):
                 "city": {"id": str(self.city.id), "name": self.city.name},
             },
         )
+
+    def test_admin_feed_filters_by_canonical_address_neighborhood(self):
+        canonical_neighborhood = Neighborhood.objects.create(
+            name="Centro",
+            city=self.city.name,
+            city_ref=self.city,
+            region=self.region,
+        )
+        legacy_neighborhood = Neighborhood.objects.create(
+            name="Bairro legado",
+            city=self.city.name,
+            city_ref=self.city,
+            region=self.other_region,
+        )
+        self.camera.address = Address.objects.create(
+            street="Rua das Águas",
+            city=self.city.name,
+            city_ref=self.city,
+            neighborhood=canonical_neighborhood,
+        )
+        self.camera.neighborhood = legacy_neighborhood
+        self.camera.save(update_fields=["address", "neighborhood"])
+        self.client.force_authenticate(self.admin)
+
+        canonical_response = self.client.get(
+            f"/api/operational-alerts/?neighborhood_id={canonical_neighborhood.id}"
+        )
+        legacy_response = self.client.get(
+            f"/api/operational-alerts/?neighborhood_id={legacy_neighborhood.id}"
+        )
+
+        self.assertEqual(canonical_response.status_code, 200)
+        self.assertEqual(canonical_response.data["count"], 1)
+        self.assertEqual(
+            canonical_response.data["results"][0]["id"],
+            str(self.alert.id),
+        )
+        self.assertEqual(legacy_response.status_code, 200)
+        self.assertEqual(legacy_response.data["count"], 0)
+
+    def test_admin_feed_filters_by_legacy_neighborhood_only_without_address(self):
+        neighborhood = Neighborhood.objects.create(
+            name="Bairro sem endereço",
+            city=self.city.name,
+            city_ref=self.city,
+            region=self.region,
+        )
+        self.camera.neighborhood = neighborhood
+        self.camera.save(update_fields=["neighborhood"])
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get(
+            f"/api/operational-alerts/?neighborhood_id={neighborhood.id}"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["id"], str(self.alert.id))
+
+    def test_admin_feed_rejects_invalid_neighborhood_uuid(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get(
+            "/api/operational-alerts/?neighborhood_id=nao-e-uuid"
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("neighborhood_id", response.data)
+
+    def test_neighborhood_filter_combines_with_existing_filters_and_pagination(self):
+        neighborhood = Neighborhood.objects.create(
+            name="Bairro paginado",
+            city=self.city.name,
+            city_ref=self.city,
+            region=self.region,
+        )
+        self.camera.neighborhood = neighborhood
+        self.camera.save(update_fields=["neighborhood"])
+        second_camera = Camera.objects.create(
+            status=Camera.CameraStatus.ACTIVE,
+            description="Segunda câmera",
+            neighborhood=neighborhood,
+            region=self.region,
+        )
+        second_detection = FloodDetectionRecord.objects.create(
+            camera=second_camera,
+            is_flooded=True,
+            confidence=0.91,
+            prob_normal=0.03,
+            prob_medium=0.06,
+            prob_flooded=0.91,
+        )
+        second_alert = OperationalAlert.objects.create(
+            camera=second_camera,
+            region=self.region,
+            initial_detection=second_detection,
+            latest_detection=second_detection,
+            first_detected_at=second_detection.created_at,
+            last_detected_at=second_detection.created_at,
+            evidence={"classification": "FLOOD_INDICATION"},
+        )
+        self.client.force_authenticate(self.admin)
+
+        first_page = self.client.get(
+            "/api/operational-alerts/",
+            {
+                "neighborhood_id": str(neighborhood.id),
+                "region_id": str(self.region.id),
+                "status": OperationalAlert.Status.OPEN_INDICATION,
+                "page_size": 1,
+            },
+        )
+        second_page = self.client.get(
+            "/api/operational-alerts/",
+            {
+                "neighborhood_id": str(neighborhood.id),
+                "region_id": str(self.region.id),
+                "status": OperationalAlert.Status.OPEN_INDICATION,
+                "page_size": 1,
+                "page": 2,
+            },
+        )
+        empty_combination = self.client.get(
+            "/api/operational-alerts/",
+            {
+                "neighborhood_id": str(neighborhood.id),
+                "region_id": str(self.other_region.id),
+            },
+        )
+
+        self.assertEqual(first_page.status_code, 200)
+        self.assertEqual(first_page.data["count"], 2)
+        self.assertEqual(len(first_page.data["results"]), 1)
+        self.assertIsNotNone(first_page.data["next"])
+        self.assertEqual(second_page.status_code, 200)
+        self.assertEqual(second_page.data["count"], 2)
+        self.assertEqual(len(second_page.data["results"]), 1)
+        self.assertCountEqual(
+            [
+                first_page.data["results"][0]["id"],
+                second_page.data["results"][0]["id"],
+            ],
+            [str(self.alert.id), str(second_alert.id)],
+        )
+        self.assertEqual(empty_combination.status_code, 200)
+        self.assertEqual(empty_combination.data["count"], 0)
+        self.assertEqual(empty_combination.data["results"], [])
 
     @patch("core.notifications.tasks.deliver_push_batch_task.delay")
     def test_confirmation_is_unique_and_second_request_conflicts(self, delay):

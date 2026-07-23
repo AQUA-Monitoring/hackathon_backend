@@ -104,6 +104,7 @@ class OperationalAlertFilterSerializer(serializers.Serializer):
     date_from = serializers.DateTimeField(required=False)
     date_to = serializers.DateTimeField(required=False)
     region_id = serializers.UUIDField(required=False)
+    neighborhood_id = serializers.UUIDField(required=False)
     camera_id = serializers.UUIDField(required=False)
     detected_from = serializers.DateTimeField(required=False)
     detected_to = serializers.DateTimeField(required=False)

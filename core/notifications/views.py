@@ -1,6 +1,6 @@
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
-from django.db.models import Count
+from django.db.models import Count, Q
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -254,6 +254,15 @@ class OperationalAlertViewSet(viewsets.ViewSet):
             queryset = queryset.filter(status=values["status"])
         if values.get("region"):
             queryset = queryset.filter(region_id=values["region"])
+        if values.get("neighborhood_id"):
+            neighborhood_id = values["neighborhood_id"]
+            queryset = queryset.filter(
+                Q(camera__address__neighborhood_id=neighborhood_id)
+                | Q(
+                    camera__address__isnull=True,
+                    camera__neighborhood_id=neighborhood_id,
+                )
+            )
         if values.get("camera"):
             queryset = queryset.filter(camera_id=values["camera"])
         if values.get("date_from"):
