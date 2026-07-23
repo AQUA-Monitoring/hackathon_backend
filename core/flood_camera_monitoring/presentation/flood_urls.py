@@ -3,6 +3,8 @@
 from django.urls import path
 
 from core.flood_camera_monitoring.presentation.demo_views import (
+    DemoPredictionBatchView,
+    DemoPredictionFrameView,
     DemoPredictView,
     DemoStateView,
     DemoStatusView,
@@ -46,6 +48,16 @@ urlpatterns = [
     path("demo", DemoStatusView.as_view(), name="demo-status"),
     path("demo/state", DemoStateView.as_view(), name="demo-state"),
     path("demo/predict", DemoPredictView.as_view(), name="demo-predict"),
+    path(
+        "demo/predictions/batch",
+        DemoPredictionBatchView.as_view(),
+        name="demo-predictions-batch",
+    ),
+    path(
+        "demo/predictions/frames/<str:frame_id>",
+        DemoPredictionFrameView.as_view(),
+        name="demo-prediction-frame",
+    ),
     path("demo/sources", DemoSourcesView.as_view(), name="demo-sources"),
     path(
         "demo/sources/<str:mode>",

@@ -134,6 +134,16 @@ class DemoPredictionQuerySerializer(serializers.Serializer):
     sequence = serializers.IntegerField(required=False, min_value=0)
 
 
+class DemoPredictionBatchSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
+    """Validate a temporal comparison anchored to the rendered HLS segment."""
+
+    session_id = serializers.CharField(max_length=128, allow_blank=False)
+    anchor_sequence = serializers.IntegerField(min_value=0)
+    model_version = serializers.CharField(
+        required=False, max_length=128, allow_blank=False
+    )
+
+
 def _date_time(value):
     if value is None:
         return None
