@@ -28,12 +28,14 @@ from core.uploader.router import router as uploader_router
 from core.sync.export import ExportView
 from config.core_health import health
 from config.media import serve_media
+from core.flood_camera_monitoring.presentation.metrics_views import internal_metrics
 
 router = DefaultRouter()
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("health/", health, name="service-health"),
+    path("internal/metrics", internal_metrics, name="internal-metrics"),
     # JWT auth endpoints
     # Single auth token route using email/password
     path(

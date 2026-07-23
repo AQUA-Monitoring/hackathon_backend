@@ -132,6 +132,11 @@ FLOOD_CAMERA_DEDICATED_QUEUE = (
     os.getenv("FLOOD_CAMERA_DEDICATED_QUEUE", "0") == "1"
 )
 
+# Private Prometheus endpoint. It is intentionally absent unless both the
+# explicit feature flag and a dedicated bearer token are configured.
+INTERNAL_METRICS_ENABLED = os.getenv("INTERNAL_METRICS_ENABLED", "0") == "1"
+INTERNAL_METRICS_TOKEN = os.getenv("INTERNAL_METRICS_TOKEN", "").strip()
+
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
