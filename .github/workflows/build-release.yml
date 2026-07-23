@@ -1,0 +1,79 @@
+name: Build immutable Aqua backend release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_ref:
+        description: Commit SHA or protected tag to build
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aqua-backend-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: [self-hosted, linux, x64, aqua-builder]
+    timeout-minutes: 90
+    steps:
+      - name: Checkout requested release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_ref }}
+          fetch-depth: 1
+
+      - name: Resolve immutable SHA
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          test -n "$sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate private registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.AQUA_REGISTRY_HOST }}
+          username: ${{ secrets.AQUA_REGISTRY_USERNAME }}
+          password: ${{ secrets.AQUA_REGISTRY_PASSWORD }}
+
+      - name: Build backend image
+        env:
+          REGISTRY: ${{ secrets.AQUA_REGISTRY_HOST }}
+          SHA: ${{ steps.release.outputs.sha }}
+        run: docker build --pull --target full -f Dockerfile.slim -t "$REGISTRY/aqua-backend:$SHA" .
+
+      - name: Build demo image
+        env:
+          REGISTRY: ${{ secrets.AQUA_REGISTRY_HOST }}
+          SHA: ${{ steps.release.outputs.sha }}
+        run: docker build --pull --target demo -f Dockerfile.slim -t "$REGISTRY/aqua-demo:$SHA" .
+
+      - name: Push images
+        env:
+          REGISTRY: ${{ secrets.AQUA_REGISTRY_HOST }}
+          SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          set -euo pipefail
+          docker push "$REGISTRY/aqua-backend:$SHA"
+          docker push "$REGISTRY/aqua-demo:$SHA"
+
+      - name: Record digests
+        env:
+          REGISTRY: ${{ secrets.AQUA_REGISTRY_HOST }}
+          SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          set -euo pipefail
+          backend=$(docker image inspect "$REGISTRY/aqua-backend:$SHA" --format '{{index .RepoDigests 0}}')
+          demo=$(docker image inspect "$REGISTRY/aqua-demo:$SHA" --format '{{index .RepoDigests 0}}')
+          {
+            echo "## Aqua backend release"
+            echo "Commit: $SHA"
+            echo "Backend: $backend"
+            echo "Demo: $demo"
+          } >> "$GITHUB_STEP_SUMMARY"
