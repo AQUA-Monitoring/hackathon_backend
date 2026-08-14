@@ -332,7 +332,8 @@ ACCOUNT_EMAIL_VERIFICATION = "none"
 
 ACCOUNT_EMAIL_REQUIRED = False   # opcional
 ACCOUNT_LOGIN_METHODS = {"username"}  # ou conforme sua configuração
-LOGIN_REDIRECT_URL = "/admin/"
+LOGIN_REDIRECT_URL = "/accounts/"
+LOGOUT_REDIRECT_URL= "/accounts/"
 SOCIALACCOUNT_PROVIDERS = {
     'google': {
         'EMAIL_AUTHENTICATION': True,
